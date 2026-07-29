@@ -4,11 +4,6 @@
 
 사용법:
     python feature_engineering.py
-
-주의:
-    이 스크립트는 yfinance로 실제 인터넷에서 데이터를 받아옵니다.
-    Claude 샌드박스 환경에서는 외부 금융 API 접속이 막혀 있어 실행이 안 되니,
-    본인 로컬 환경(VSCode, 주피터 등)에서 실행하세요.
 """
 
 import pandas as pd
@@ -179,7 +174,7 @@ def build_feature_dataset(
     df = add_label(df, horizon=horizon)
 
     feature_cols = [
-        "Close",  # 백테스트 벤치마크(buy&hold) 계산용
+        "Close", "Volume",  # Close: 백테스트 벤치마크(buy&hold) 계산용 / Volume: 거래대금(수급 feature 정규화) 계산용
         "return_5d", "return_10d", "return_20d", "rsi_14", "macd_hist",
         "hist_vol_20d", "bb_width", "bb_position", "atr_14",
         "volume_ratio_20d", "obv_change_20d",

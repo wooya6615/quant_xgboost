@@ -1,13 +1,17 @@
 """
-공매도 feature 추가 전/후 성능을 비교하는 ablation 스크립트
-(train_xgboost_ablation.py와 동일한 구조 -- BASE/SHORT_ONLY/COMBINED + 멀티 시드 검증)
+공매도(국내, pykrx 청크 복원) feature 추가 전/후 성능을 비교하는 ablation 스크립트
+
+[수정] 361행(fold 6개) 시절 축소했던 train_size=150/test_size=30을 원래 규모로 복원.
+    2015~2026 전체 이력(2796행, feature_engineering_short_kr.py로 복원)을 쓰면
+    수급 실험과 동일하게 train_size=300/test_size=60/step=60 기준으로 fold 41개 수준이 나옴.
+    horizon 스윕(1/3/5/10일)도 investor 실험과 동일한 구조로 지원.
 
 사용법:
     python train_xgboost_short_ablation.py
 
 전제:
-    feature_engineering_short.py를 먼저 실행해서
-    {ticker}_features_with_short_h{horizon}.csv가 만들어져 있어야 함.
+    feature_engineering_short_kr.py의 build_multi_horizon_short_datasets()로
+    {ticker_krx}_features_with_short_kr_h{horizon}.csv 들이 만들어져 있어야 함.
 """
 
 import pandas as pd
@@ -28,14 +32,16 @@ FEATURE_COLS_SHORT = [
 ]
 
 FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_SHORT
+FEATURE_COLS_SHORT_ONLY = FEATURE_COLS_SHORT
 
-HORIZON = 5  # feature_engineering_short.py의 horizon과 반드시 동일 (embargo에 사용)
+DEFAULT_HORIZON = 5
 
 
 # ------------------------------------------------------------------
 # 1. 데이터 로드
 # ------------------------------------------------------------------
-def load_dataset(path: str = "005930_features_with_short_h5.csv") -> pd.DataFrame:
+def load_dataset(ticker_krx: str = "064350", horizon: int = DEFAULT_HORIZON) -> pd.DataFrame:
+    path = f"{ticker_krx}_features_with_short_kr_h{horizon}.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=FEATURE_COLS_COMBINED + ["label"])
@@ -59,15 +65,20 @@ def walk_forward_splits(n_rows: int, train_size: int, test_size: int, step: int,
 
 # ------------------------------------------------------------------
 # 3. fold별 학습 + 평가
+#    [수정] train_size/test_size/step 기본값을 원래 규모(300/60/60)로 복원
 # ------------------------------------------------------------------
-def run_walk_forward(df: pd.DataFrame, feature_cols: list, train_size=100, test_size=20,
-                      step=20, embargo=HORIZON, threshold=0.5, random_state=42):
+def run_walk_forward(df: pd.DataFrame, feature_cols: list, embargo: int, train_size=300, test_size=60,
+                      step=60, threshold=0.5, random_state=42):
     X = df[feature_cols]
     y = df["label"]
 
     splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
     if not splits:
-        raise ValueError("데이터가 부족해서 walk-forward split을 만들 수 없어요.")
+        raise ValueError(
+            f"데이터가 부족해서 walk-forward split을 만들 수 없어요. "
+            f"(n_rows={len(df)}, train_size={train_size}, test_size={test_size}, embargo={embargo}) "
+            f"train_size/test_size를 줄이세요."
+        )
 
     fold_rows = []
     importances = []
@@ -77,10 +88,15 @@ def run_walk_forward(df: pd.DataFrame, feature_cols: list, train_size=100, test_
         X_test, y_test = X.iloc[list(test_idx)], y.iloc[list(test_idx)]
 
         model = xgb.XGBClassifier(
-            n_estimators=200, max_depth=4, learning_rate=0.05,
-            subsample=0.8, colsample_bytree=0.8,
-            reg_alpha=0.1, reg_lambda=1.0,
-            eval_metric="logloss", random_state=random_state,
+            n_estimators=200,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
+            eval_metric="logloss",
+            random_state=random_state,
         )
         model.fit(X_train, y_train)
 
@@ -111,10 +127,10 @@ def run_walk_forward(df: pd.DataFrame, feature_cols: list, train_size=100, test_
 # ------------------------------------------------------------------
 # 4. BASE vs SHORT_ONLY vs COMBINED 비교
 # ------------------------------------------------------------------
-def compare_feature_sets(df: pd.DataFrame, random_state=42, **wfo_kwargs):
-    base_fold_df, base_importance = run_walk_forward(df, FEATURE_COLS_BASE, random_state=random_state, **wfo_kwargs)
-    short_fold_df, short_importance = run_walk_forward(df, FEATURE_COLS_SHORT, random_state=random_state, **wfo_kwargs)
-    combined_fold_df, combined_importance = run_walk_forward(df, FEATURE_COLS_COMBINED, random_state=random_state, **wfo_kwargs)
+def compare_feature_sets(df: pd.DataFrame, horizon: int, random_state=42, **wfo_kwargs):
+    base_fold_df, base_importance = run_walk_forward(df, FEATURE_COLS_BASE, embargo=horizon, random_state=random_state, **wfo_kwargs)
+    short_fold_df, short_importance = run_walk_forward(df, FEATURE_COLS_SHORT_ONLY, embargo=horizon, random_state=random_state, **wfo_kwargs)
+    combined_fold_df, combined_importance = run_walk_forward(df, FEATURE_COLS_COMBINED, embargo=horizon, random_state=random_state, **wfo_kwargs)
 
     metrics = ["accuracy", "vs_base_rate", "precision", "recall", "auc"]
     summary = pd.DataFrame({
@@ -143,11 +159,10 @@ def compare_feature_sets(df: pd.DataFrame, random_state=42, **wfo_kwargs):
 # ------------------------------------------------------------------
 # 5. 멀티 시드 검증
 # ------------------------------------------------------------------
-def run_multi_seed(df: pd.DataFrame, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
+def run_multi_seed(df: pd.DataFrame, horizon: int, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
     rows = []
     for seed in seeds:
-        print(f"--- seed={seed} ---")
-        result = compare_feature_sets(df, random_state=seed, **wfo_kwargs)
+        result = compare_feature_sets(df, horizon=horizon, random_state=seed, **wfo_kwargs)
         rows.append({
             "seed": seed,
             "BASE_auc": result["summary"].loc["auc", "BASE"],
@@ -157,61 +172,107 @@ def run_multi_seed(df: pd.DataFrame, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
             "COMBINED_vs_base_rate": result["summary"].loc["vs_base_rate", "COMBINED"],
             "COMBINED_vsbase_diff": result["summary"].loc["vs_base_rate", "COMBINED-BASE"],
             "SHORT_ONLY_auc": result["summary"].loc["auc", "SHORT_ONLY"],
+            "n_folds": result["n_folds"],
         })
     return pd.DataFrame(rows)
 
 
+# ------------------------------------------------------------------
+# 6. Horizon 스윕
+# ------------------------------------------------------------------
+def run_horizon_sweep(ticker_krx: str, horizons: list[int] = None, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
+    if horizons is None:
+        horizons = [1, 3, 5, 10]
+
+    horizon_rows = []
+    seed_details = {}
+
+    for horizon in horizons:
+        print(f"\n{'#' * 60}")
+        print(f"# horizon = {horizon}")
+        print(f"{'#' * 60}")
+
+        try:
+            df = load_dataset(ticker_krx=ticker_krx, horizon=horizon)
+        except FileNotFoundError:
+            print(f"  {ticker_krx}_features_with_short_kr_h{horizon}.csv 없음 -- "
+                  f"feature_engineering_short_kr.py의 build_multi_horizon_short_datasets()를 먼저 실행하세요.")
+            continue
+
+        n_rows = len(df)
+        label_rate = df["label"].mean()
+        print(f"  데이터: {n_rows}행, label=1 비율 {label_rate:.3f}")
+
+        try:
+            seed_df = run_multi_seed(df, horizon=horizon, seeds=seeds, **wfo_kwargs)
+        except ValueError as e:
+            print(f"  {e}")
+            continue
+
+        seed_details[horizon] = seed_df
+        n_seeds = len(seed_df)
+        combined_beats_base_count = (seed_df["COMBINED_auc_diff"] > 0).sum()
+
+        horizon_rows.append({
+            "horizon": horizon,
+            "n_rows": n_rows,
+            "n_folds": seed_df["n_folds"].iloc[0] if n_seeds else np.nan,
+            "label_rate": label_rate,
+            "COMBINED_auc_diff_mean": seed_df["COMBINED_auc_diff"].mean(),
+            "COMBINED_auc_diff_std": seed_df["COMBINED_auc_diff"].std(),
+            "COMBINED_beats_BASE_seeds": f"{combined_beats_base_count}/{n_seeds}",
+            "SHORT_ONLY_auc_mean": seed_df["SHORT_ONLY_auc"].mean(),
+        })
+
+    return pd.DataFrame(horizon_rows), seed_details
+
+
 if __name__ == "__main__":
-    df = load_dataset()
+    TICKER_KRX = "064350"  # 현대로템
+
+    # (A) 단일 horizon (기존 방식, fold 41개 수준으로 복원됐는지 우선 확인)
+    print("=" * 60)
+    print(f"=== 단일 horizon 확인 (horizon={DEFAULT_HORIZON}) ===")
+    print("=" * 60)
+
+    df = load_dataset(ticker_krx=TICKER_KRX, horizon=DEFAULT_HORIZON)
     print(f"전체 데이터: {df.shape[0]}행\n")
 
-    result = compare_feature_sets(df)
-
-    print("=" * 60)
-    print("=== 전체 평균 비교 (fold 평균, seed=42) ===")
-    print("=" * 60)
+    result = compare_feature_sets(df, horizon=DEFAULT_HORIZON)
+    print("=== 전체 평균 비교 (fold 평균) ===")
     print(result["summary"].round(4))
-
     print(f"\n베이스라인 이긴 fold 수 (fold 총 {result['n_folds']}개)")
-    print(f"  BASE:       {result['base_win_folds']} / {result['n_folds']}")
-    print(f"  SHORT_ONLY: {result['short_win_folds']} / {result['n_folds']}")
-    print(f"  COMBINED:   {result['combined_win_folds']} / {result['n_folds']}")
+    print(f"  BASE:        {result['base_win_folds']} / {result['n_folds']}")
+    print(f"  SHORT_ONLY:  {result['short_win_folds']} / {result['n_folds']}")
+    print(f"  COMBINED:    {result['combined_win_folds']} / {result['n_folds']}")
 
-    print("\n" + "=" * 60)
-    print("=== SHORT_ONLY Feature Importance ===")
-    print("=" * 60)
-    print(result["short_importance"])
-
-    # ------------------------------------------------------------------
-    # 멀티 시드 검증
-    # ------------------------------------------------------------------
-    print("\n\n" + "#" * 60)
-    print("# 멀티 시드 검증 (5개 시드 반복)")
+    # (B) 멀티 시드 (단일 horizon)
+    print("\n" + "#" * 60)
+    print("# 멀티 시드 검증 (5개 시드, horizon=5)")
     print("#" * 60)
-
-    seed_df = run_multi_seed(df)
-
-    print("\n" + "=" * 60)
-    print("=== 시드별 결과 ===")
-    print("=" * 60)
+    seed_df = run_multi_seed(df, horizon=DEFAULT_HORIZON)
     print(seed_df.round(4).to_string(index=False))
 
-    n_seeds = len(seed_df)
     combined_beats_base_count = (seed_df["COMBINED_auc_diff"] > 0).sum()
-    combined_vsbase_beats_count = (seed_df["COMBINED_vsbase_diff"] > 0).sum()
+    n_seeds = len(seed_df)
+    print(f"\nCOMBINED가 BASE보다 AUC 높았던 시드: {combined_beats_base_count} / {n_seeds}")
+    print(f"AUC 차이 평균: {seed_df['COMBINED_auc_diff'].mean():+.4f} "
+          f"(표준편차 {seed_df['COMBINED_auc_diff'].std():.4f})")
+
+    # (C) Horizon 스윕 (1/3/5/10일)
+    print("\n\n" + "#" * 60)
+    print("# Horizon 스윕 (1/3/5/10일)")
+    print("#" * 60)
+
+    horizon_summary, seed_details = run_horizon_sweep(ticker_krx=TICKER_KRX)
 
     print("\n" + "=" * 60)
-    print("=== 최종 판정 (5개 시드 종합) ===")
+    print("=== Horizon별 요약 ===")
     print("=" * 60)
-    print(f"COMBINED가 BASE보다 AUC 높았던 시드:        {combined_beats_base_count} / {n_seeds}")
-    print(f"COMBINED가 BASE보다 vs_base_rate 높았던 시드: {combined_vsbase_beats_count} / {n_seeds}")
-    print(f"\nAUC 차이(COMBINED-BASE) 평균: {seed_df['COMBINED_auc_diff'].mean():+.4f} (표준편차 {seed_df['COMBINED_auc_diff'].std():.4f})")
-    print(f"vs_base_rate 차이 평균:       {seed_df['COMBINED_vsbase_diff'].mean():+.4f} (표준편차 {seed_df['COMBINED_vsbase_diff'].std():.4f})")
+    print(horizon_summary.round(4).to_string(index=False))
 
-    print()
-    if combined_beats_base_count >= n_seeds - 1 and combined_vsbase_beats_count >= n_seeds - 1:
-        print("→ 5개 시드 중 대부분에서 COMBINED가 BASE를 이김. 재현 가능한 신호로 볼 여지가 있음.")
-    elif combined_beats_base_count <= 1 and combined_vsbase_beats_count <= 1:
-        print("→ 5개 시드 중 대부분에서 COMBINED가 BASE보다 못함. 공매도 feature는 이 조건에서 엣지 없음.")
-    else:
-        print(f"→ 시드마다 결과가 갈림 ({combined_beats_base_count}/{n_seeds}가 개선). 노이즈에 가까울 가능성 있음.")
+    if not horizon_summary.empty:
+        best_row = horizon_summary.loc[horizon_summary["COMBINED_auc_diff_mean"].idxmax()]
+        print(f"\nCOMBINED-BASE AUC 차이가 가장 큰 horizon: {int(best_row['horizon'])}일 "
+              f"(평균 {best_row['COMBINED_auc_diff_mean']:+.4f}, 표준편차 {best_row['COMBINED_auc_diff_std']:.4f})")
+        print("→ 표준편차가 평균의 절반을 넘으면 노이즈 가능성 높음. fold 개수도 같이 확인할 것.")

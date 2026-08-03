@@ -2,6 +2,11 @@
 방향성 분류 ML 모델을 위한 feature engineering
 모멘텀 / 변동성 / 거래량 / 상대강도 4개 그룹 계산
 
+[수정] build_feature_dataset()에 cost_threshold 파라미터 추가
+    -- horizon을 짧게 잡을수록(예: 1일) N일 후 수익률의 변동폭 자체가 작아지므로,
+       기존 horizon=5/10에서 쓰던 0.5% 임계값을 그대로 쓰면 라벨이 거의 다 0으로 쏠리는
+       극단적 불균형이 생길 수 있음. horizon 스윕 시 이 값도 같이 조정할 수 있게 열어둠.
+
 사용법:
     python feature_engineering.py
 """
@@ -164,6 +169,7 @@ def build_feature_dataset(
     start: str = "2015-01-01",
     end: str = "2026-07-18",
     horizon: int = 10,
+    cost_threshold: float = 0.005,   # [추가] horizon 스윕 시 이 값도 같이 조정할 수 있게 노출
 ) -> pd.DataFrame:
     df, bench = load_data(ticker, benchmark, start, end)
 
@@ -171,7 +177,7 @@ def build_feature_dataset(
     df = add_volatility_features(df)
     df = add_volume_features(df)
     df = add_relative_strength_features(df, bench)
-    df = add_label(df, horizon=horizon)
+    df = add_label(df, horizon=horizon, cost_threshold=cost_threshold)
 
     feature_cols = [
         "Close", "Volume",  # Close: 백테스트 벤치마크(buy&hold) 계산용 / Volume: 거래대금(수급 feature 정규화) 계산용

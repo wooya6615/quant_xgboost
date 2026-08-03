@@ -9,6 +9,14 @@
     "외국인이 며칠째 순매수 중인데 아직 가격에 안 반영됐다" 같은 정보는
     RSI/MACD로는 절대 못 만들어내는 신호이기 때문.
 
+[수정] horizon 스윕 지원 추가
+    - build_feature_dataset_with_investor()에 cost_threshold 파라미터 추가
+      (horizon이 짧아질수록 N일 후 수익률 변동폭도 작아지므로 임계값을 같이 낮춰야
+       라벨이 한쪽으로 쏠리는 걸 방지할 수 있음)
+    - build_multi_horizon_datasets(): 여러 horizon에 대해 한 번에 데이터셋을 만들고
+      각각 CSV로 저장하는 함수 추가. 매번 스크립트를 수동으로 고쳐 돌릴 필요 없이
+      horizon별 라벨 분포/행 개수를 바로 비교할 수 있게 함.
+
 설치:
     pip install pykrx
 
@@ -104,9 +112,14 @@ def build_feature_dataset_with_investor(
     start: str = "2015-01-01",
     end: str = "2026-07-18",
     horizon: int = 10,
+    cost_threshold: float = 0.005,   # [추가] horizon 짧을수록 낮춰서 넘길 것
 ) -> pd.DataFrame:
-    base = build_feature_dataset(ticker=ticker, benchmark=benchmark, start=start, end=end, horizon=horizon)
+    base = build_feature_dataset(
+        ticker=ticker, benchmark=benchmark, start=start, end=end,
+        horizon=horizon, cost_threshold=cost_threshold,
+    )
 
+    # 수급 데이터는 종목당 한 번만 받으면 되고 horizon과 무관하므로 그대로 재사용 가능
     investor_df = load_investor_flow(ticker_krx, start, end)
     result = add_investor_features(base, investor_df)
 
@@ -119,16 +132,70 @@ def build_feature_dataset_with_investor(
     return result
 
 
+# ------------------------------------------------------------------
+# 4. [신규] 여러 horizon용 데이터셋을 한 번에 생성
+#    - horizon이 짧아질수록 라벨 임계값도 낮춰야 하므로, horizon:cost_threshold 매핑을 인자로 받음
+#    - 기본값은 대략적인 가이드라인일 뿐 -- 실제로는 생성 후 라벨 분포를 보고 조정 권장
+# ------------------------------------------------------------------
+DEFAULT_HORIZON_COST_MAP = {
+    1: 0.002,   # 1일 변동폭은 작아서 임계값도 낮춤
+    3: 0.003,
+    5: 0.005,   # 기존 실험값 그대로
+    10: 0.008,  # 누적 기간이 길어지는 만큼 임계값도 높임
+}
+
+
+def build_multi_horizon_datasets(
+    ticker: str,
+    ticker_krx: str,
+    horizons: list[int] = None,
+    horizon_cost_map: dict[int, float] = None,
+    benchmark: str = "^KS11",
+    start: str = "2015-01-01",
+    end: str = "2026-07-18",
+) -> dict[int, pd.DataFrame]:
+    """
+    horizons에 지정한 모든 horizon에 대해 데이터셋을 만들고 각각 CSV로 저장.
+    반환값은 {horizon: DataFrame} 딕셔너리 -- 바로 이어서 ablation/훈련에 쓸 수 있음.
+    """
+    if horizons is None:
+        horizons = sorted(DEFAULT_HORIZON_COST_MAP.keys())
+    if horizon_cost_map is None:
+        horizon_cost_map = DEFAULT_HORIZON_COST_MAP
+
+    datasets = {}
+    for horizon in horizons:
+        cost_threshold = horizon_cost_map.get(horizon, 0.005)
+        print(f"\n--- horizon={horizon}, cost_threshold={cost_threshold} 생성 중 ---")
+
+        dataset = build_feature_dataset_with_investor(
+            ticker=ticker, ticker_krx=ticker_krx, benchmark=benchmark,
+            start=start, end=end, horizon=horizon, cost_threshold=cost_threshold,
+        )
+
+        label_dist = dataset["label"].value_counts(normalize=True).to_dict()
+        print(f"  shape: {dataset.shape}, 라벨 분포: {label_dist}")
+
+        out_path = f"{ticker_krx}_features_with_investor_h{horizon}.csv"
+        dataset.to_csv(out_path)
+        print(f"  저장 완료: {out_path}")
+
+        datasets[horizon] = dataset
+
+    return datasets
+
+
 if __name__ == "__main__":
-    TICKER = "064350.KS"    # 현대로템 (yfinance용)
+    TICKER = "064350.KS"    # 현대로템 (yfinance용) -- 저유동성 종목에서 효과 더 컸던 종목
     TICKER_KRX = "064350"   # 현대로템 (pykrx/KIS용 6자리 코드)
-    HORIZON = 5             # 삼성전자 실험에서 유효했던 horizon 그대로 재현
 
-    dataset = build_feature_dataset_with_investor(ticker=TICKER, ticker_krx=TICKER_KRX, horizon=HORIZON)
-    print(f"수급 feature 포함 데이터셋 shape (ticker={TICKER_KRX}, horizon={HORIZON}): {dataset.shape}")
-    print(f"\n동반매수(smart_money_aligned) 비율:\n{dataset['smart_money_aligned'].value_counts(normalize=True)}")
-    print(f"\n샘플:\n{dataset[['foreign_net_3d', 'inst_net_3d', 'foreign_net_ratio_5d', 'smart_money_aligned']].tail()}")
+    # 단일 horizon만 필요하면 이렇게:
+    # dataset = build_feature_dataset_with_investor(ticker=TICKER, ticker_krx=TICKER_KRX, horizon=5)
 
-    out_path = f"{TICKER_KRX}_features_with_investor_h{HORIZON}.csv"
-    dataset.to_csv(out_path)
-    print(f"\n저장 완료: {out_path}")
+    # horizon 스윕 (1/3/5/10일) -- 결과 나오면 train_xgboost_ablation.py의 run_horizon_sweep()으로 이어서 비교
+    datasets = build_multi_horizon_datasets(ticker=TICKER, ticker_krx=TICKER_KRX)
+
+    print("\n=== 전체 horizon별 요약 ===")
+    for horizon, dataset in datasets.items():
+        print(f"horizon={horizon}: {dataset.shape[0]}행, "
+              f"label=1 비율 {dataset['label'].mean():.3f}")

@@ -18,8 +18,13 @@ XGBoost를 활용해 개별 종목의 단기(N일 후) 방향성을 예측하는
 ├── feature_engineering_investor.py    # 수급 데이터(외국인/기관 순매수) feature 추가, horizon 스윕 지원
 ├── train_xgboost_ablation.py          # BASE/INVESTOR_ONLY/COMBINED 3-way ablation + 멀티 시드 검증 + horizon 스윕
 ├── backtest_comparison.py             # BASE vs COMBINED 신호 기반 실전 백테스트 비교
-├── feature_engineering_short_kr.py    # 국내 개별종목 공매도(거래량/비중) feature 추가 -- pykrx 청크 분할로 전체 이력 복원
-├── train_xgboost_short_ablation.py    # BASE/SHORT_ONLY/COMBINED 3-way ablation + horizon 스윕(1/3/5/10일)
+├── feature_engineering_short_kr.py     # 국내 개별종목 공매도(거래량/비중) feature 추가 -- pykrx 청크 분할로 전체 이력 복원
+├── train_xgboost_short_ablation.py     # BASE/SHORT_ONLY/COMBINED 3-way ablation + horizon 스윕(1/3/5/10일)
+├── feature_engineering_valuation.py    # 밸류에이션(PER/PBR/배당수익률) feature 추가, horizon 스윕 지원(1/3/5/10/20일)
+├── train_xgboost_valuation_ablation.py # BASE/VALUATION_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
+├── backtest_valuation_comparison.py    # BASE/VALUATION_ONLY/COMBINED 3자 거래비용 반영 백테스트 + Buy & Hold
+├── analyze_signal_concentration.py     # 백테스트 수익이 특정 연도에 몰려있는지(국면 의존성) 연도별 분해
+├── backtest_valuation_excl_2025.py     # 2025년 이례적 강세장을 제외하고 재검증
 └── README.md
 ```
 
@@ -68,6 +73,21 @@ python train_xgboost_short_ablation.py   # BASE/SHORT_ONLY/COMBINED 비교 + 멀
 ```
 
 `feature_engineering_short_kr.py`의 `TICKER`/`TICKER_KRX` 상수로 종목 변경 가능합니다.
+
+### 6) 밸류에이션(PER/PBR/배당수익률) feature 추가 파이프라인
+
+```bash
+python feature_engineering_valuation.py       # {ticker_krx}_features_with_valuation_h{horizon}.csv 생성 (horizon 1/3/5/10/20 자동 생성)
+python train_xgboost_valuation_ablation.py    # BASE/VALUATION_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
+python backtest_valuation_comparison.py       # BASE/VALUATION_ONLY/COMBINED 3자 백테스트 + Buy & Hold (horizon=10, 20)
+python analyze_signal_concentration.py        # 백테스트 수익이 특정 연도에 몰려있는지 확인
+python backtest_valuation_excl_2025.py        # 2025년 이례적 강세장을 제외하고 재검증
+```
+
+PER/PBR은 그날 종가 기준으로 계산되는 값(EPS/BPS는 이미 공시된 분기 실적)이라 수급/공매도와 달리
+1일 shift가 필요 없습니다 -- 가격 feature와 동일하게 "당일 종가 시점에 이미 확정된 정보"로 취급합니다.
+절대 PER/PBR은 종목/업종마다 기준이 달라서, 그 종목 자체의 최근 1년(252거래일) 분포 대비
+z-score로 정규화한 `per_zscore_252d`/`pbr_zscore_252d`도 함께 사용합니다.
 
 **pykrx 공매도 데이터 이력 복원 (중요):**
 pykrx의 `get_shorting_volume_by_date()` wrapper 함수는 약 2년(730일)이 넘는 기간을 한 번에 요청하면
@@ -155,6 +175,30 @@ N일차 row에는 N일 당일 값이 아니라 **N-1일까지 발표분만** 들
 (단, fold 개수 자체는 pykrx 청크 분할로 6개→41개까지 정상 회복시켰으므로, 표본 부족이 아니라
 데이터 자체의 신호 부재로 판단.)
 
+### 4) 밸류에이션(PER/PBR/배당수익률) 데이터 추가 실험
+
+가격/수급/공매도와 달리 재무제표 기준 정보라 정보 소스 자체가 완전히 독립적. 전통적으로
+"중장기 평균회귀" 성격의 팩터라 horizon을 1~20일까지 스윕해서 확인했습니다.
+
+| 실험 | 결과 |
+|---|---|
+| Horizon 스윕 (1/3/5/10/20일, 현대로템/삼성전자 공통) | horizon이 길어질수록 COMBINED-BASE AUC 차이가 단조 증가 (1일 ≈0 → 20일 +0.024~0.042), 두 종목 모두 5/5 시드 일관 |
+| VALUATION_ONLY 단독 AUC | horizon=20에서 0.58~0.60 -- COMBINED(가격+밸류에이션 혼합)보다 오히려 높게 나옴 |
+| 백테스트 (horizon=10, 전체 기간 2015~2026) | 현대로템 COMBINED 680.7% vs Buy&Hold 469.3% (MDD도 개선) -- 처음으로 Buy&Hold를 이긴 사례. 그러나 삼성전자는 COMBINED 464.2%가 BASE(832.7%)에도 못 미침 -- 종목 간 순위가 완전히 뒤집힘 |
+| 국면 집중도 분석 (연도별 분해) | 두 종목 모두 2025년(주가 자체가 +129~+261% 급등한 이례적 강세장) 하나가 전체 log-return 기여도의 48~61%를 차지 |
+| **2025년 제외 재검증 (2015~2024)** | **현대로템**: BASE -5.0% / COMBINED **64.1%** / Buy&Hold 29.5% -- 2025년 없이도 COMBINED가 Buy&Hold를 이김. **삼성전자**: BASE 38.8% / COMBINED 32.8% / Buy&Hold **42.8%** -- 2025년을 빼자 엣지가 사라짐 |
+
+**결론**:
+1. Ablation 수준(AUC)에서는 밸류에이션 feature가 두 종목·모든 horizon에서 일관되게 유의미한 신호를 보임 --
+   지금까지 실험한 feature 중 가장 이론적 배경(전통적 value factor)과 잘 들어맞는 결과
+2. 그러나 그 신호를 거래 전략(threshold+순차진입) 손익으로 전환하면 종목별로 결과가 크게 갈림 --
+   AUC 개선이 실전 손익 우위로 자동 전환되지 않는다는 기존 결론을 재확인
+3. **저유동성 종목(현대로템)에서는 이례적 강세장(2025)을 제외하고도 Buy&Hold를 이기는 재현 가능한
+   엣지가 확인됨.** 고유동성 종목(삼성전자)에서는 2025년 국면 하나에 전적으로 의존한 착시였음
+4. 이는 기존 수급(외국인/기관 순매수) 실험과 동일한 "저유동성 종목이 가격에 미반영된 정보를
+   더 오래 담고 있다"는 유동성 가설을 **세 번째로 재확인**시켜준 결과 -- 프로젝트 전체에서
+   가장 일관되게 반복된 패턴
+
 자세한 실험 로그는 별도 기록 문서 참고.
 
 ## 주의사항
@@ -170,3 +214,6 @@ N일차 row에는 N일 당일 값이 아니라 **N-1일까지 발표분만** 들
 - 단일 시드 결과만으로 "개선됐다/안됐다"를 판단하지 말 것 — 반드시 멀티 시드(최소 5개) 확인 후 결론 내릴 것.
 - horizon을 바꿀 땐 라벨 임계값(`cost_threshold`)도 같이 조정할 것 — 짧은 horizon에 기존 임계값을 그대로 쓰면
   라벨이 한쪽으로 심하게 쏠릴 수 있음.
+- 백테스트에서 좋은 누적수익률이 나와도 곧바로 신뢰하지 말 것 — `analyze_signal_concentration.py`로 연도별
+  기여도를 분해해서, 특정 연도(이례적 강세장) 하나에 수익이 몰려있는 건 아닌지 반드시 확인할 것.
+  실제로 삼성전자 밸류에이션 실험에서 464% 우위가 2025년 한 해에 전적으로 의존한 착시였음이 드러남.

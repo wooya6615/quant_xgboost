@@ -34,7 +34,7 @@ ROUND_TRIP_COST = 0.002  # 왕복 거래비용 0.2% (수수료+슬리피지 가�
 # ------------------------------------------------------------------
 # 1. 데이터 로드
 # ------------------------------------------------------------------
-def load_dataset(path: str = "nvda_features.csv") -> pd.DataFrame:
+def load_dataset(path: str = "064350_features_with_short_h5.csv") -> pd.DataFrame:
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     required = set(FEATURE_COLS + ["label", "future_return", "Close"])

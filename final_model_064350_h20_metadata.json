@@ -1,0 +1,70 @@
+{
+  "ticker_krx": "064350",
+  "ticker_name": "현대로템",
+  "horizon": 20,
+  "cost_threshold": 0.012,
+  "feature_cols": [
+    "return_5d",
+    "return_10d",
+    "return_20d",
+    "rsi_14",
+    "macd_hist",
+    "hist_vol_20d",
+    "bb_width",
+    "bb_position",
+    "atr_14",
+    "volume_ratio_20d",
+    "obv_change_20d",
+    "excess_return_5d",
+    "excess_return_20d",
+    "per",
+    "pbr",
+    "div",
+    "per_zscore_252d",
+    "pbr_zscore_252d"
+  ],
+  "xgb_params": {
+    "n_estimators": 200,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "eval_metric": "logloss",
+    "random_state": 42
+  },
+  "trained_at": "2026-08-08 18:03:41",
+  "train_data_start": "2016-02-05",
+  "train_data_end": "2026-07-09",
+  "train_n_rows": 2307,
+  "label_distribution": {
+    "0.0": 0.5214564369310793,
+    "1.0": 0.47854356306892065
+  },
+  "feature_importance": {
+    "div": 0.12080000340938568,
+    "per": 0.07689999788999557,
+    "obv_change_20d": 0.07259999960660934,
+    "per_zscore_252d": 0.0697999969124794,
+    "hist_vol_20d": 0.06930000334978104,
+    "pbr": 0.06809999793767929,
+    "return_20d": 0.0649000033736229,
+    "pbr_zscore_252d": 0.06279999762773514,
+    "atr_14": 0.057500001043081284,
+    "bb_width": 0.049300000071525574,
+    "macd_hist": 0.04830000177025795,
+    "excess_return_20d": 0.042899999767541885,
+    "bb_position": 0.037700001150369644,
+    "return_10d": 0.035599999129772186,
+    "volume_ratio_20d": 0.03440000116825104,
+    "excess_return_5d": 0.032600000500679016,
+    "rsi_14": 0.029100000858306885,
+    "return_5d": 0.027300000190734863
+  },
+  "validated_performance_reference": {
+    "note": "walk-forward 검증 당시(ablation) 성능 -- 재학습된 이 모델의 실제 성능이 아니라 참고용 기준선입니다. PROJECT_SUMMARY.md 2-3절 참고.",
+    "combined_vs_base_auc_diff_h20": 0.0585,
+    "backtest_note": "2025년 제외 재검증: BASE -5.0% / COMBINED 64.1% / Buy&Hold 29.5%"
+  }
+}

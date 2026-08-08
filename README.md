@@ -36,6 +36,7 @@ XGBoost를 활용해 개별 종목의 단기(N일 후) 방향성을 예측하는
 ├── train_xgboost_ablation_foreign_own.py      # BASE/FOREIGN_OWN_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
 ├── backtest_comparison_foreign_own.py         # BASE vs COMBINED 실전 백테스트 비교 (h=5, 다종목 순회)
 ├── analyze_signal_concentration_foreign_own.py # BASE/COMBINED 각각의 연도별 손익 분해 (구조적 저하 여부 확인용)
+├── train_final_model.py                # 최종 프로덕션 모델 (현대로템, BASE+밸류에이션 COMBINED, h=20) 학습/저장/예측
 └── README.md
 ```
 
@@ -160,6 +161,35 @@ stock)"를 feature로 씁니다. pykrx `get_exhaustion_rates_of_foreign_investme
 남아있으면 `.ffill()` 호출 시 `TypeError: No matching signature found`가 날 수 있습니다.
 `pd.to_numeric(..., errors="coerce").astype("float64")`로 표준 numpy dtype으로 명시적 캐스팅한 뒤
 `ffill()`을 호출해야 합니다 (`feature_engineering_foreign_ownership.py`의 `add_foreign_ownership_features()` 참고).
+
+### 9) 최종 프로덕션 모델 (현대로템, BASE+밸류에이션 COMBINED, horizon=20)
+
+```bash
+python train_final_model.py              # 전체 히스토리로 최종 학습 + 모델/메타데이터 저장
+python train_final_model.py --predict     # 저장된 모델로 최신 시점 기준 예측
+```
+
+지금까지의 ablation/backtest 스크립트는 전부 Walk-Forward로 "검증"만 했음 (매 fold마다
+재학습 → 평가). 이 스크립트는 실제 배포를 가정하고, 사용 가능한 전체 히스토리로 모델을
+**한 번만 학습**해서 `final_model_064350_h20.joblib` + `final_model_064350_h20_metadata.json`으로
+저장함. 선정 근거는 PROJECT_SUMMARY.md 7절 참고.
+
+**⚠️ 예측 시 반드시 알아야 할 버그/우회 사항**: `feature_engineering.py`의
+`build_feature_dataset()`은 마지막에 `df[feature_cols].dropna()`를 호출하는데, `feature_cols`에
+`label`/`future_return`이 포함돼 있음. 라벨은 horizon(20)일 후 수익률로 계산되므로 데이터
+맨 끝 20영업일치는 항상 NaN이고, 이 dropna 때문에 **최근 20영업일이 통째로 사라짐** (학습
+목적으로는 정상 동작이지만, "오늘 시점 예측"에는 방해가 됨). `train_final_model.py`의
+`predict_latest()`는 `add_label()`을 거치지 않고 개별 feature 함수(`add_momentum_features` 등)만
+직접 호출해서 이 문제를 우회함.
+
+**실제 검증 사례**: 2026년 8월 초 예측 시점에 모델이 강하게 베어리시한 확률(0.0956)을 냄.
+원인을 추적한 결과 7/24 발표된 2분기 어닝쇼크(영업이익 컨센서스 대비 -14%)로 7/27 하루
+-16.14% 폭락 + 같은 주 코스피 전체 폭락(7/28 -10.84%, 7/29 -5.98%)이 겹친 실제 시장 이벤트였음.
+모델이 이 불안정한 국면(높은 변동성, 어닝쇼크 후 불완전한 반등)을 제대로 포착한 것으로 해석됨 --
+데이터 글리치가 아니라는 걸 yfinance raw 데이터(`auto_adjust=False`)와 외부 소스(증권사 리포트,
+뉴스 기사) 교차검증으로 확인.
+
+---
 
 ## 방법론 요약
 
@@ -319,3 +349,12 @@ AUC와는 상관관계를 보이지만 실전 손익 우위를 보장하는 충�
 - "AUC가 개선됐다"와 "그 종목에서 실전 백테스트가 Buy&Hold를 이겼다"는 별개 결론입니다 -- 둘을 같은
   결론으로 섞어서 보고하지 말 것. 밸류에이션 4종목, FX 2종목, 외국인 보유율 2종목 모두에서 이 괴리가
   확인됐습니다.
+- 여러 세션에 걸쳐 재사용하는 종목코드는 주기적으로 재검증할 것 -- 대한제강을 001430(세아베스틸지주)으로
+  잘못 쓴 채 진행된 실험이 있었고, 084010(진짜 대한제강)으로 재검증하니 결론이 완전히 뒤집혔습니다.
+- `build_feature_dataset()`은 학습용으로 설계돼 있어 라벨(`label`/`future_return`) NaN인 행까지 전부
+  dropna로 제거합니다. "지금 시점 예측"처럼 라벨이 필요 없는 추론 용도로 쓸 땐 `add_label()`을
+  거치지 않고 개별 feature 함수만 호출해서 이 dropna를 우회해야 최신 데이터를 온전히 쓸 수 있습니다
+  (`train_final_model.py`의 `predict_latest()` 참고).
+- 모델 예측이 극단적으로 나올 때(예: base_rate 대비 크게 벗어난 확률) 바로 "모델이 이상하다"고
+  단정하지 말 것 -- 실제 시장에 어닝쇼크나 지수 전체 폭락 같은 이벤트가 있었을 수 있습니다. yfinance
+  `auto_adjust=False`로 raw Close/Adj Close를 비교하고, 뉴스/증권사 리포트로 교차검증할 것.

@@ -1,4 +1,28 @@
+# 가상환경
+venv/
+
+# 환경변수/API 키
 .env
-test.py
-Kiwoom-REST-API/
+
+# 생성되는 feature 데이터셋
 *.csv
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# OpenDartReader가 자동 생성하는 종목코드 캐시
+docs_cache/
+
+# 최종 모델 아티팩트
+final_model_*.joblib
+final_model_*_metadata.json
+
+# IDE 설정
+.vscode/
+.idea/
+
+test.py
+
+Kiwoom-REST-API/

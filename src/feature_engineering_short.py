@@ -22,12 +22,16 @@
 """
 
 import time
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
 from kiwoom import get_client
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 API_ID = "ka10014"
@@ -151,6 +155,6 @@ if __name__ == "__main__":
     print(f"\n숏커버링 신호 비율:\n{dataset['short_covering_signal'].value_counts(normalize=True)}")
     print(f"\n샘플:\n{dataset[['short_qty_5d', 'short_weight_5d_avg', 'short_covering_signal']].tail()}")
 
-    out_path = f"{TICKER_KRX}_features_with_short_h{HORIZON}.csv"
+    out_path = DATA_DIR / f"{TICKER_KRX}_features_with_short_h{HORIZON}.csv"
     dataset.to_csv(out_path)
     print(f"\n저장 완료: {out_path}")

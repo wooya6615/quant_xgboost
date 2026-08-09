@@ -10,10 +10,14 @@
     {ticker_krx}_features_with_valuation_h{horizon}.csv 들이 만들어져 있어야 함.
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS_BASE = [
@@ -37,7 +41,7 @@ DEFAULT_HORIZON = 5
 # 1. 데이터 로드
 # ------------------------------------------------------------------
 def load_dataset(ticker_krx: str = "064350", horizon: int = DEFAULT_HORIZON) -> pd.DataFrame:
-    path = f"{ticker_krx}_features_with_valuation_h{horizon}.csv"
+    path = DATA_DIR / f"{ticker_krx}_features_with_valuation_h{horizon}.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=FEATURE_COLS_COMBINED + ["label"])

@@ -11,10 +11,14 @@ nvda_features.csv를 이용한 XGBoost 방향성 분류 - Walk-Forward 버전
     python train_xgboost_wfo.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS = [
@@ -30,7 +34,8 @@ HORIZON = 10  # feature_engineering.py에서 쓴 horizon과 반드시 동일하�
 # ------------------------------------------------------------------
 # 1. 데이터 로드
 # ------------------------------------------------------------------
-def load_dataset(path: str = "nvda_features.csv") -> pd.DataFrame:
+def load_dataset(path: str = None) -> pd.DataFrame:
+    path = path or DATA_DIR / "nvda_features.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     df = df.replace([np.inf, -np.inf], np.nan).dropna()

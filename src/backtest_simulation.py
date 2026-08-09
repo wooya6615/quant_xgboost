@@ -15,9 +15,13 @@
     python backtest_simulation.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS = [
@@ -34,7 +38,8 @@ ROUND_TRIP_COST = 0.002  # 왕복 거래비용 0.2% (수수료+슬리피지 가�
 # ------------------------------------------------------------------
 # 1. 데이터 로드
 # ------------------------------------------------------------------
-def load_dataset(path: str = "064350_features_with_short_h5.csv") -> pd.DataFrame:
+def load_dataset(path: str = None) -> pd.DataFrame:
+    path = path or DATA_DIR / "064350_features_with_short_h5.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     required = set(FEATURE_COLS + ["label", "future_return", "Close"])
@@ -186,7 +191,7 @@ def evaluate_strategy(trades: pd.DataFrame, df: pd.DataFrame, train_size=300, te
 
 
 if __name__ == "__main__":
-    df = load_dataset("005930_features.csv")
+    df = load_dataset(DATA_DIR / "005930_features.csv")
     print(f"전체 데이터: {df.shape[0]}행\n")
 
     THRESHOLD = 0.6  # 이전 sweep에서 유의미한 우위 보인 구간으로 설정, 필요시 조정

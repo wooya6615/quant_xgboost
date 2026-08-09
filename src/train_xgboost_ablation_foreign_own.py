@@ -1,38 +1,34 @@
 """
-환율(원달러) feature 추가 전/후 성능을 비교하는 ablation 스크립트
-(train_xgboost_ablation.py를 FX용으로 리네이밍 -- 구조/로직은 100% 동일, INVESTOR -> FX)
+외국인 보유율/한도소진율 feature 추가 전/후 성능을 비교하는 ablation 스크립트
+(train_xgboost_ablation_fx.py를 리네이밍 -- 구조/로직은 100% 동일, FX -> FOREIGN_OWN)
 
 핵심 설계:
     같은 데이터, 같은 fold 구성, 같은 하이퍼파라미터로
-    BASE(가격 feature 13개) vs BASE + FX(환율 feature 5개 추가)만 비교함.
-    -- 그래야 성능 차이가 순수하게 "환율 feature 추가 효과"인지 확인 가능.
+    BASE(가격 feature 13개) vs BASE + FOREIGN_OWN(외국인 보유율 feature 4개 추가)만 비교함.
+    -- 그래야 성능 차이가 순수하게 "외국인 보유율 feature 추가 효과"인지 확인 가능.
     (train_xgboost_wfo.py의 walk-forward 구조를 그대로 재사용)
 
-[수정] horizon 파라미터화
-    - 기존엔 HORIZON=5가 전역 상수로 박혀 있어서 embargo/파일 경로가 전부 거기 묶여있었음.
-      horizon 스윕(1/3/5/10일)을 자동으로 돌리려면 함수 인자로 받아야 해서 구조 변경.
-    - run_horizon_sweep(): feature_engineering_fx.py가 만든
-      {ticker_krx}_features_with_fx_h{horizon}.csv들을 순서대로 읽어서
-      각 horizon마다 멀티시드 ablation을 돌리고, horizon별 COMBINED-BASE AUC 차이를
-      한 표로 모아줌 -- "환율 신호가 며칠 후에 가장 잘 반영되는지" 한눈에 비교 가능.
+    수급(투자자별 순매수, flow) 실험과 대조군으로 삼기 좋은 지점: 순매수는 "당일 사고판 양"이고
+    보유율은 "누적된 포지션 레벨"이라 서로 다른 정보일 가능성이 있음. 만약 여기서도 수급 실험과
+    비슷한 패턴(저유동성 종목에서 강함)이 나오면 "외국인 자금이 관여하는 저유동성 종목"이라는
+    공통 요인이 근본 원인일 수 있고, 다르게 나오면 진짜 독립적인 신호일 가능성이 커짐.
 
 사용법:
-    python train_xgboost_ablation_fx.py
+    python train_xgboost_ablation_foreign_own.py
 
 전제:
-    feature_engineering_fx.py를 먼저 실행해서
-    {ticker_krx}_features_with_fx_h{horizon}.csv 들이 만들어져 있어야 함.
-
-    ※ feature_engineering_fx.py는 현재 단일 horizon만 저장하는 build_feature_dataset_with_fx()로 되어 있음.
-      horizon 스윕을 돌리려면 investor 실험 때 만든 build_multi_horizon_datasets()처럼
-      여러 horizon을 순회하며 저장하는 함수를 feature_engineering_fx.py에 추가해야 함.
-      (원하면 그 함수도 만들어줄게)
+    feature_engineering_foreign_ownership.py를 먼저 실행해서
+    {ticker_krx}_features_with_foreign_own_h{horizon}.csv 들이 만들어져 있어야 함.
 """
+
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS_BASE = [
@@ -42,24 +38,23 @@ FEATURE_COLS_BASE = [
     "excess_return_5d", "excess_return_20d",
 ]
 
-FEATURE_COLS_FX = [
-    "fx_return_5d", "fx_return_10d", "fx_return_20d",
-    "fx_vol_20d", "fx_deviation_ma20",
+FEATURE_COLS_FOREIGN_OWN = [
+    "foreign_own_chg_5d", "foreign_own_chg_20d",
+    "foreign_own_accel_5d", "foreign_limit_exhaustion_level",
 ]
 
-FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_FX
+FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_FOREIGN_OWN
 
-FEATURE_COLS_FX_ONLY = FEATURE_COLS_FX  # 가격 feature 없이 환율 feature 5개만
+FEATURE_COLS_FOREIGN_OWN_ONLY = FEATURE_COLS_FOREIGN_OWN  # 가격 feature 없이 외국인 보유율 feature 4개만
 
 DEFAULT_HORIZON = 5  # 기존 실험과의 하위호환용 기본값 (단일 실행 시 사용)
 
 
 # ------------------------------------------------------------------
 # 1. 데이터 로드
-#    [수정] 경로에 horizon을 넣어서 파일명을 동적으로 조합
 # ------------------------------------------------------------------
 def load_dataset(ticker_krx: str = "064350", horizon: int = DEFAULT_HORIZON) -> pd.DataFrame:
-    path = f"{ticker_krx}_features_with_fx_h{horizon}.csv"
+    path = DATA_DIR / f"{ticker_krx}_features_with_foreign_own_h{horizon}.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=FEATURE_COLS_COMBINED + ["label"])
@@ -83,7 +78,6 @@ def walk_forward_splits(n_rows: int, train_size: int, test_size: int, step: int,
 
 # ------------------------------------------------------------------
 # 3. fold별 학습 + 평가 (feature_cols를 인자로 받아서 BASE/COMBINED 재사용)
-#    [수정] embargo에 기본값 대신 horizon을 그대로 넘기도록 호출부에서 명시
 # ------------------------------------------------------------------
 def run_walk_forward(df: pd.DataFrame, feature_cols: list, embargo: int, train_size=300, test_size=60,
                       step=60, threshold=0.5, random_state=42):
@@ -140,44 +134,42 @@ def run_walk_forward(df: pd.DataFrame, feature_cols: list, embargo: int, train_s
 
 # ------------------------------------------------------------------
 # 4. BASE vs COMBINED 비교
-#    [수정] embargo를 horizon 값으로 명시적으로 넘김
 # ------------------------------------------------------------------
 def compare_feature_sets(df: pd.DataFrame, horizon: int, random_state=42, **wfo_kwargs):
     base_fold_df, base_importance = run_walk_forward(df, FEATURE_COLS_BASE, embargo=horizon, random_state=random_state, **wfo_kwargs)
-    fx_fold_df, fx_importance = run_walk_forward(df, FEATURE_COLS_FX_ONLY, embargo=horizon, random_state=random_state, **wfo_kwargs)
+    fo_fold_df, fo_importance = run_walk_forward(df, FEATURE_COLS_FOREIGN_OWN_ONLY, embargo=horizon, random_state=random_state, **wfo_kwargs)
     combined_fold_df, combined_importance = run_walk_forward(df, FEATURE_COLS_COMBINED, embargo=horizon, random_state=random_state, **wfo_kwargs)
 
     metrics = ["accuracy", "vs_base_rate", "precision", "recall", "auc"]
     summary = pd.DataFrame({
         "BASE": base_fold_df[metrics].mean(),
-        "FX_ONLY": fx_fold_df[metrics].mean(),
+        "FOREIGN_OWN_ONLY": fo_fold_df[metrics].mean(),
         "COMBINED": combined_fold_df[metrics].mean(),
     })
-    summary["FX_ONLY-BASE"] = summary["FX_ONLY"] - summary["BASE"]
+    summary["FOREIGN_OWN_ONLY-BASE"] = summary["FOREIGN_OWN_ONLY"] - summary["BASE"]
     summary["COMBINED-BASE"] = summary["COMBINED"] - summary["BASE"]
 
     base_win_folds = (base_fold_df["vs_base_rate"] > 0).sum()
-    fx_win_folds = (fx_fold_df["vs_base_rate"] > 0).sum()
+    fo_win_folds = (fo_fold_df["vs_base_rate"] > 0).sum()
     combined_win_folds = (combined_fold_df["vs_base_rate"] > 0).sum()
 
     return {
         "base_fold_df": base_fold_df,
-        "fx_fold_df": fx_fold_df,
+        "fo_fold_df": fo_fold_df,
         "combined_fold_df": combined_fold_df,
         "summary": summary,
         "base_importance": base_importance,
-        "fx_importance": fx_importance,
+        "fo_importance": fo_importance,
         "combined_importance": combined_importance,
         "base_win_folds": base_win_folds,
-        "fx_win_folds": fx_win_folds,
+        "fo_win_folds": fo_win_folds,
         "combined_win_folds": combined_win_folds,
         "n_folds": len(base_fold_df),
     }
 
 
 # ------------------------------------------------------------------
-# 5. 멀티 시드 검증 -- 특정 horizon에서 나온 결과가 노이즈인지 진짜 신호인지 확인
-#    같은 데이터/같은 fold 구성에서 XGBoost의 random_state만 바꿔가며 반복.
+# 5. 멀티 시드 검증
 # ------------------------------------------------------------------
 def run_multi_seed(df: pd.DataFrame, horizon: int, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
     rows = []
@@ -191,17 +183,16 @@ def run_multi_seed(df: pd.DataFrame, horizon: int, seeds=(42, 1, 7, 123, 2024), 
             "BASE_vs_base_rate": result["summary"].loc["vs_base_rate", "BASE"],
             "COMBINED_vs_base_rate": result["summary"].loc["vs_base_rate", "COMBINED"],
             "COMBINED_vsbase_diff": result["summary"].loc["vs_base_rate", "COMBINED-BASE"],
-            "FX_auc": result["summary"].loc["auc", "FX_ONLY"],
+            "FOREIGN_OWN_auc": result["summary"].loc["auc", "FOREIGN_OWN_ONLY"],
             "n_folds": result["n_folds"],
         })
     return pd.DataFrame(rows)
 
 
 # ------------------------------------------------------------------
-# 6. [신규] Horizon 스윕 -- 여러 horizon에 대해 멀티시드 ablation을 자동 반복
-#    "환율 신호가 며칠 후에 가장 잘 반영되는가"를 horizon별 AUC 차이로 비교
+# 6. Horizon 스윕
 # ------------------------------------------------------------------
-def run_horizon_sweep(ticker_krx: str, horizons: list[int] = None, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
+def run_horizon_sweep(ticker_krx: str, horizons: list = None, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
     if horizons is None:
         horizons = [1, 3, 5, 10]
 
@@ -216,8 +207,8 @@ def run_horizon_sweep(ticker_krx: str, horizons: list[int] = None, seeds=(42, 1,
         try:
             df = load_dataset(ticker_krx=ticker_krx, horizon=horizon)
         except FileNotFoundError:
-            print(f"  {ticker_krx}_features_with_fx_h{horizon}.csv 없음 -- "
-                  f"feature_engineering_fx.py에 multi-horizon 저장 함수를 추가해서 먼저 실행하세요.")
+            print(f"  {ticker_krx}_features_with_foreign_own_h{horizon}.csv 없음 -- "
+                  f"feature_engineering_foreign_ownership.py를 먼저 실행하세요.")
             continue
 
         n_rows = len(df)
@@ -238,7 +229,7 @@ def run_horizon_sweep(ticker_krx: str, horizons: list[int] = None, seeds=(42, 1,
             "COMBINED_auc_diff_mean": seed_df["COMBINED_auc_diff"].mean(),
             "COMBINED_auc_diff_std": seed_df["COMBINED_auc_diff"].std(),
             "COMBINED_beats_BASE_seeds": f"{combined_beats_base_count}/{n_seeds}",
-            "FX_auc_mean": seed_df["FX_auc"].mean(),
+            "FOREIGN_OWN_auc_mean": seed_df["FOREIGN_OWN_auc"].mean(),
         })
 
     horizon_summary = pd.DataFrame(horizon_rows)
@@ -246,11 +237,8 @@ def run_horizon_sweep(ticker_krx: str, horizons: list[int] = None, seeds=(42, 1,
 
 
 if __name__ == "__main__":
-    TICKER_KRX = "005930"  # 현대로템
+    TICKER_KRX = "005930"
 
-    # ------------------------------------------------------------------
-    # (A) 단일 horizon만 볼 때는 기존 방식 그대로 유지 (하위호환)
-    # ------------------------------------------------------------------
     print("=" * 60)
     print(f"=== 단일 horizon 확인 (horizon={DEFAULT_HORIZON}) ===")
     print("=" * 60)
@@ -262,15 +250,10 @@ if __name__ == "__main__":
     print("=== 전체 평균 비교 (fold 평균) ===")
     print(result["summary"].round(4))
     print(f"\n베이스라인 이긴 fold 수 (fold 총 {result['n_folds']}개)")
-    print(f"  BASE:     {result['base_win_folds']} / {result['n_folds']}")
-    print(f"  FX_ONLY:  {result['fx_win_folds']} / {result['n_folds']}")
-    print(f"  COMBINED: {result['combined_win_folds']} / {result['n_folds']}")
+    print(f"  BASE:              {result['base_win_folds']} / {result['n_folds']}")
+    print(f"  FOREIGN_OWN_ONLY:  {result['fo_win_folds']} / {result['n_folds']}")
+    print(f"  COMBINED:          {result['combined_win_folds']} / {result['n_folds']}")
 
-    # ------------------------------------------------------------------
-    # (B) [신규] Horizon 스윕 -- 1/3/5/10일 자동 비교
-    #     사전 조건: feature_engineering_fx.py에 multi-horizon 저장 함수를 추가해서
-    #     {TICKER_KRX}_features_with_fx_h{horizon}.csv 들이 이미 생성돼 있어야 함
-    # ------------------------------------------------------------------
     print("\n\n" + "#" * 60)
     print("# Horizon 스윕 (1/3/5/10일 자동 비교)")
     print("#" * 60)
@@ -292,4 +275,4 @@ if __name__ == "__main__":
         print("→ 표준편차가 평균의 절반을 넘으면 그 horizon 결과는 노이즈에 가까우니 주의.")
         print("→ n_folds가 너무 작은 horizon(특히 짧은 horizon일수록 fold가 줄 수 있음)은 결론에서 가중치를 낮출 것.")
     else:
-        print("사용 가능한 horizon 데이터셋이 없음 -- 먼저 feature_engineering_fx.py에 multi-horizon 저장 로직을 추가하세요.")
+        print("사용 가능한 horizon 데이터셋이 없음 -- 먼저 feature_engineering_foreign_ownership.py를 실행하세요.")

@@ -23,11 +23,16 @@
     python feature_engineering_fx.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import yfinance as yf
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 FX_TICKER = "KRW=X"  # 원달러 환율 (USD/KRW)
@@ -136,7 +141,7 @@ def build_multi_horizon_datasets_fx(
         print(f"[horizon={horizon}] shape={merged.shape}")
 
         if save:
-            out_path = f"{ticker_krx}_features_with_fx_h{horizon}.csv"
+            out_path = DATA_DIR / f"{ticker_krx}_features_with_fx_h{horizon}.csv"
             merged.to_csv(out_path)
             print(f"  저장 완료: {out_path}")
 

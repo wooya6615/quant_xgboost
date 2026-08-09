@@ -7,10 +7,14 @@
     python train_xgboost_pooled.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS = [
@@ -27,7 +31,8 @@ HORIZON = 10
 # ------------------------------------------------------------------
 # 1. 데이터 로드
 # ------------------------------------------------------------------
-def load_pooled_dataset(path: str = "pooled_features.csv") -> pd.DataFrame:
+def load_pooled_dataset(path: str = None) -> pd.DataFrame:
+    path = path or DATA_DIR / "pooled_features.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=[c for c in FEATURE_COLS if c != "ticker"] + ["label"])
     df["ticker"] = df["ticker"].astype("category")

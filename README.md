@@ -10,35 +10,46 @@ XGBoost를 활용해 개별 종목의 단기(N일 후) 방향성을 예측하는
 
 ```
 .
-├── feature_engineering.py             # 단일 종목 feature 생성 (모멘텀/변동성/거래량/상대강도)
-├── train_xgboost.py                   # 단순 시간순 80/20 분할 학습 + threshold sweep
-├── train_xgboost_wfo.py               # Walk-Forward 학습, fold별 base_rate 비교, 신호 집중도 분석
-├── backtest_simulation.py             # 거래비용 반영 백테스트, Buy & Hold / MDD 비교
-├── feature_engineering_pooled.py      # 다종목 데이터 풀링 (섹터 구성 변경 가능)
-├── train_xgboost_pooled.py            # 날짜 기준 Walk-Forward, ticker를 categorical feature로 학습
-├── feature_engineering_investor.py    # 수급 데이터(외국인/기관 순매수) feature 추가, horizon 스윕 지원
-├── train_xgboost_ablation.py          # BASE/INVESTOR_ONLY/COMBINED 3-way ablation + 멀티 시드 검증 + horizon 스윕
-├── backtest_comparison.py             # BASE vs COMBINED 신호 기반 실전 백테스트 비교
-├── feature_engineering_short_kr.py     # 국내 개별종목 공매도(거래량/비중) feature 추가 -- pykrx 청크 분할로 전체 이력 복원
-├── train_xgboost_short_ablation.py     # BASE/SHORT_ONLY/COMBINED 3-way ablation + horizon 스윕(1/3/5/10일)
-├── feature_engineering_valuation.py    # 밸류에이션(PER/PBR/배당수익률) feature 추가, horizon 스윕 지원(1/3/5/10/20일)
-├── train_xgboost_valuation_ablation.py # BASE/VALUATION_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
-├── backtest_valuation_comparison.py    # BASE/VALUATION_ONLY/COMBINED 3자 거래비용 반영 백테스트 + Buy & Hold
-├── analyze_signal_concentration.py     # 백테스트 수익이 특정 연도에 몰려있는지(국면 의존성) 연도별 분해
-├── backtest_valuation_excl_2025.py     # 2025년 이례적 강세장을 제외하고 재검증
-├── check_liquidity.py                  # 후보 종목들의 실제 시가총액/거래대금을 직접 조회 (저유동성 판단용)
-├── feature_engineering_fx.py           # 환율(USD/KRW) feature 추가, 멀티 horizon 저장 지원(1/3/5/10일)
-├── train_xgboost_ablation_fx.py        # BASE/FX_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
-├── backtest_comparison_fx.py           # BASE vs COMBINED 신호 기반 실전 백테스트 비교 (h=3, 다종목 순회)
-├── analyze_signal_concentration_fx.py  # FX 백테스트 수익의 연도별 집중도 분해
-├── backtest_fx_excl_regime_year.py     # 국면 지배 연도(종목별로 다름) 거래를 사후 제외하고 재계산
-├── feature_engineering_foreign_ownership.py   # 외국인 보유율/한도소진율 feature 추가, 멀티 horizon 저장 지원
-├── train_xgboost_ablation_foreign_own.py      # BASE/FOREIGN_OWN_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
-├── backtest_comparison_foreign_own.py         # BASE vs COMBINED 실전 백테스트 비교 (h=5, 다종목 순회)
-├── analyze_signal_concentration_foreign_own.py # BASE/COMBINED 각각의 연도별 손익 분해 (구조적 저하 여부 확인용)
-├── train_final_model.py                # 최종 프로덕션 모델 (현대로템, BASE+밸류에이션 COMBINED, h=20) 학습/저장/예측
+├── src/
+│   ├── feature_engineering.py             # 단일 종목 feature 생성 (모멘텀/변동성/거래량/상대강도)
+│   ├── train_xgboost.py                   # 단순 시간순 80/20 분할 학습 + threshold sweep
+│   ├── train_xgboost_wfo.py               # Walk-Forward 학습, fold별 base_rate 비교, 신호 집중도 분석
+│   ├── backtest_simulation.py             # 거래비용 반영 백테스트, Buy & Hold / MDD 비교
+│   ├── feature_engineering_pooled.py      # 다종목 데이터 풀링 (섹터 구성 변경 가능)
+│   ├── train_xgboost_pooled.py            # 날짜 기준 Walk-Forward, ticker를 categorical feature로 학습
+│   ├── feature_engineering_investor.py    # 수급 데이터(외국인/기관 순매수) feature 추가, horizon 스윕 지원
+│   ├── train_xgboost_ablation.py          # BASE/INVESTOR_ONLY/COMBINED 3-way ablation + 멀티 시드 검증 + horizon 스윕
+│   ├── backtest_comparison.py             # BASE vs COMBINED 신호 기반 실전 백테스트 비교
+│   ├── feature_engineering_short_kr.py     # 국내 개별종목 공매도(거래량/비중) feature 추가 -- pykrx 청크 분할로 전체 이력 복원
+│   ├── train_xgboost_short_ablation.py     # BASE/SHORT_ONLY/COMBINED 3-way ablation + horizon 스윕(1/3/5/10일)
+│   ├── feature_engineering_valuation.py    # 밸류에이션(PER/PBR/배당수익률) feature 추가, horizon 스윕 지원(1/3/5/10/20일)
+│   ├── train_xgboost_valuation_ablation.py # BASE/VALUATION_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
+│   ├── backtest_valuation_comparison.py    # BASE/VALUATION_ONLY/COMBINED 3자 거래비용 반영 백테스트 + Buy & Hold
+│   ├── analyze_signal_concentration.py     # 백테스트 수익이 특정 연도에 몰려있는지(국면 의존성) 연도별 분해
+│   ├── backtest_valuation_excl_2025.py     # 2025년 이례적 강세장을 제외하고 재검증
+│   ├── feature_engineering_fx.py           # 환율(USD/KRW) feature 추가, 멀티 horizon 저장 지원(1/3/5/10일)
+│   ├── train_xgboost_ablation_fx.py        # BASE/FX_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
+│   ├── backtest_comparison_fx.py           # BASE vs COMBINED 신호 기반 실전 백테스트 비교 (h=3, 다종목 순회)
+│   ├── analyze_signal_concentration_fx.py  # FX 백테스트 수익의 연도별 집중도 분해
+│   ├── backtest_fx_excl_regime_year.py     # 국면 지배 연도(종목별로 다름) 거래를 사후 제외하고 재계산
+│   ├── feature_engineering_foreign_ownership.py   # 외국인 보유율/한도소진율 feature 추가, 멀티 horizon 저장 지원
+│   ├── train_xgboost_ablation_foreign_own.py      # BASE/FOREIGN_OWN_ONLY/COMBINED 3-way ablation + 멀티 시드 + horizon 스윕
+│   ├── backtest_comparison_foreign_own.py         # BASE vs COMBINED 실전 백테스트 비교 (h=5, 다종목 순회)
+│   ├── analyze_signal_concentration_foreign_own.py # BASE/COMBINED 각각의 연도별 손익 분해 (구조적 저하 여부 확인용)
+│   ├── feature_engineering_dart.py                # DART 공시 빈도 feature 추가
+│   ├── train_xgboost_ablation_dart.py             # BASE/DART_ONLY/COMBINED 3-way ablation
+│   ├── feature_engineering_dart_major_holder.py   # DART 대량보유상황보고(5% Rule) feature 추가
+│   ├── train_xgboost_ablation_major_holder.py     # BASE/MAJOR_HOLDER_ONLY/COMBINED 3-way ablation
+│   ├── analyze_signal_concentration_daehan_valuation.py # 대한제강 밸류에이션 백테스트 연도별 분해
+│   └── train_final_model.py                # 최종 프로덕션 모델 (현대로템, BASE+밸류에이션 COMBINED, h=20) 학습/저장/예측
+├── data/                                   # 생성되는 {ticker}_features*.csv (gitignore 처리, 스크립트가 자동 생성)
+├── models/                                 # train_final_model.py가 저장하는 .joblib/_metadata.json (gitignore 처리)
+├── docs/
+│   └── PROJECT_SUMMARY.md                  # 프로젝트 종합 보고서 (실험별 결과, 핵심 교훈)
 └── README.md
 ```
+
+모든 스크립트는 **레포 루트에서** `python src/스크립트명.py` 형태로 실행합니다 (아래 "실행 순서"의 모든 명령어도 동일). 각 스크립트는 CSV를 읽고 쓸 때 `data/` 폴더를 자동으로 바라보도록 `Path(__file__)` 기준 상대경로로 되어 있어, 실행 위치만 레포 루트로 맞추면 별도 설정 없이 그대로 동작합니다.
 
 ## 실행 순서
 
@@ -55,24 +66,24 @@ pip install yfinance pandas numpy xgboost scikit-learn pykrx python-dotenv
 ### 2) 단일 종목 파이프라인 (가격 feature만)
 
 ```bash
-python feature_engineering.py     # {ticker}_features.csv 생성
-python train_xgboost_wfo.py       # walk-forward 학습 + fold별 성능
-python backtest_simulation.py     # 거래비용 반영 실전 시뮬레이션
+python src/feature_engineering.py     # {ticker}_features.csv 생성
+python src/train_xgboost_wfo.py       # walk-forward 학습 + fold별 성능
+python src/backtest_simulation.py     # 거래비용 반영 실전 시뮬레이션
 ```
 
 ### 3) 다종목 풀링 파이프라인
 
 ```bash
-python feature_engineering_pooled.py   # pooled_features.csv 생성
-python train_xgboost_pooled.py         # 날짜 기준 walk-forward 학습
+python src/feature_engineering_pooled.py   # pooled_features.csv 생성
+python src/train_xgboost_pooled.py         # 날짜 기준 walk-forward 학습
 ```
 
 ### 4) 수급 데이터(외국인/기관 순매수) feature 추가 파이프라인
 
 ```bash
-python feature_engineering_investor.py   # {ticker}_features_with_investor_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
-python train_xgboost_ablation.py         # BASE/INVESTOR_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
-python backtest_comparison.py            # BASE vs COMBINED 실전 백테스트 비교
+python src/feature_engineering_investor.py   # {ticker}_features_with_investor_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
+python src/train_xgboost_ablation.py         # BASE/INVESTOR_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
+python src/backtest_comparison.py            # BASE vs COMBINED 실전 백테스트 비교
 ```
 
 `feature_engineering_investor.py`의 `TICKER`/`TICKER_KRX`/`DEFAULT_HORIZON_COST_MAP` 상수로 종목·기간·horizon별 라벨 임계값 변경 가능합니다.
@@ -80,8 +91,8 @@ python backtest_comparison.py            # BASE vs COMBINED 실전 백테스트 
 ### 5) 개별종목 공매도(국내) feature 추가 파이프라인
 
 ```bash
-python feature_engineering_short_kr.py   # {ticker_krx}_features_with_short_kr_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
-python train_xgboost_short_ablation.py   # BASE/SHORT_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
+python src/feature_engineering_short_kr.py   # {ticker_krx}_features_with_short_kr_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
+python src/train_xgboost_short_ablation.py   # BASE/SHORT_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
 ```
 
 `feature_engineering_short_kr.py`의 `TICKER`/`TICKER_KRX` 상수로 종목 변경 가능합니다.
@@ -89,11 +100,11 @@ python train_xgboost_short_ablation.py   # BASE/SHORT_ONLY/COMBINED 비교 + 멀
 ### 6) 밸류에이션(PER/PBR/배당수익률) feature 추가 파이프라인
 
 ```bash
-python feature_engineering_valuation.py       # {ticker_krx}_features_with_valuation_h{horizon}.csv 생성 (horizon 1/3/5/10/20 자동 생성)
-python train_xgboost_valuation_ablation.py    # BASE/VALUATION_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
-python backtest_valuation_comparison.py       # BASE/VALUATION_ONLY/COMBINED 3자 백테스트 + Buy & Hold (horizon=10, 20)
-python analyze_signal_concentration.py        # 백테스트 수익이 특정 연도에 몰려있는지 확인
-python backtest_valuation_excl_2025.py        # 2025년 이례적 강세장을 제외하고 재검증
+python src/feature_engineering_valuation.py       # {ticker_krx}_features_with_valuation_h{horizon}.csv 생성 (horizon 1/3/5/10/20 자동 생성)
+python src/train_xgboost_valuation_ablation.py    # BASE/VALUATION_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
+python src/backtest_valuation_comparison.py       # BASE/VALUATION_ONLY/COMBINED 3자 백테스트 + Buy & Hold (horizon=10, 20)
+python src/analyze_signal_concentration.py        # 백테스트 수익이 특정 연도에 몰려있는지 확인
+python src/backtest_valuation_excl_2025.py        # 2025년 이례적 강세장을 제외하고 재검증
 ```
 
 PER/PBR은 그날 종가 기준으로 계산되는 값(EPS/BPS는 이미 공시된 분기 실적)이라 수급/공매도와 달리
@@ -124,11 +135,11 @@ KRX가 비공식 스크래핑 도구(IP)를 차단하는 경우가 있어, 막�
 ### 7) 환율(USD/KRW) feature 추가 파이프라인
 
 ```bash
-python feature_engineering_fx.py           # {ticker_krx}_features_with_fx_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
-python train_xgboost_ablation_fx.py        # BASE/FX_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
-python backtest_comparison_fx.py           # BASE vs COMBINED 실전 백테스트 비교 (h=3, 현대로템/대한제강 순회)
-python analyze_signal_concentration_fx.py  # 백테스트 수익이 특정 연도에 몰려있는지 확인
-python backtest_fx_excl_regime_year.py     # 국면 지배 연도의 거래를 사후 제외하고 재계산
+python src/feature_engineering_fx.py           # {ticker_krx}_features_with_fx_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
+python src/train_xgboost_ablation_fx.py        # BASE/FX_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
+python src/backtest_comparison_fx.py           # BASE vs COMBINED 실전 백테스트 비교 (h=3, 현대로템/대한제강 순회)
+python src/analyze_signal_concentration_fx.py  # 백테스트 수익이 특정 연도에 몰려있는지 확인
+python src/backtest_fx_excl_regime_year.py     # 국면 지배 연도의 거래를 사후 제외하고 재계산
 ```
 
 환율은 yfinance `KRW=X`로 조회하며, KRX(평일 장중만 거래)와 FX 시장(사실상 24시간 거래)의
@@ -139,10 +150,10 @@ python backtest_fx_excl_regime_year.py     # 국면 지배 연도의 거래를 �
 ### 8) 외국인 보유율/한도소진율 feature 추가 파이프라인
 
 ```bash
-python feature_engineering_foreign_ownership.py    # {ticker_krx}_features_with_foreign_own_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
-python train_xgboost_ablation_foreign_own.py       # BASE/FOREIGN_OWN_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
-python backtest_comparison_foreign_own.py          # BASE vs COMBINED 실전 백테스트 비교 (h=5, 현대로템/삼성전자 순회)
-python analyze_signal_concentration_foreign_own.py # BASE/COMBINED 각각의 연도별 손익 분해
+python src/feature_engineering_foreign_ownership.py    # {ticker_krx}_features_with_foreign_own_h{horizon}.csv 생성 (horizon 1/3/5/10 자동 생성)
+python src/train_xgboost_ablation_foreign_own.py       # BASE/FOREIGN_OWN_ONLY/COMBINED 비교 + 멀티 시드 검증 + horizon 스윕
+python src/backtest_comparison_foreign_own.py          # BASE vs COMBINED 실전 백테스트 비교 (h=5, 현대로템/삼성전자 순회)
+python src/analyze_signal_concentration_foreign_own.py # BASE/COMBINED 각각의 연도별 손익 분해
 ```
 
 수급(외국인 순매수)이 "당일 사고판 양(flow)"인 반면, 이 실험은 "지금 얼마나 들고 있나(누적 레벨,
@@ -165,14 +176,14 @@ stock)"를 feature로 씁니다. pykrx `get_exhaustion_rates_of_foreign_investme
 ### 9) 최종 프로덕션 모델 (현대로템, BASE+밸류에이션 COMBINED, horizon=20)
 
 ```bash
-python train_final_model.py              # 전체 히스토리로 최종 학습 + 모델/메타데이터 저장
-python train_final_model.py --predict     # 저장된 모델로 최신 시점 기준 예측
+python src/train_final_model.py              # 전체 히스토리로 최종 학습 + 모델/메타데이터 저장
+python src/train_final_model.py --predict     # 저장된 모델로 최신 시점 기준 예측
 ```
 
 지금까지의 ablation/backtest 스크립트는 전부 Walk-Forward로 "검증"만 했음 (매 fold마다
 재학습 → 평가). 이 스크립트는 실제 배포를 가정하고, 사용 가능한 전체 히스토리로 모델을
-**한 번만 학습**해서 `final_model_064350_h20.joblib` + `final_model_064350_h20_metadata.json`으로
-저장함. 선정 근거는 PROJECT_SUMMARY.md 7절 참고.
+**한 번만 학습**해서 `models/final_model_064350_h20.joblib` + `models/final_model_064350_h20_metadata.json`으로
+저장함. 선정 근거는 docs/PROJECT_SUMMARY.md 7절 참고.
 
 **⚠️ 예측 시 반드시 알아야 할 버그/우회 사항**: `feature_engineering.py`의
 `build_feature_dataset()`은 마지막에 `df[feature_cols].dropna()`를 호출하는데, `feature_cols`에

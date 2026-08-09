@@ -11,9 +11,14 @@
     python feature_engineering.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import yfinance as yf
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -200,5 +205,5 @@ if __name__ == "__main__":
     print(f"\n라벨 분포:\n{dataset['label'].value_counts(normalize=True)}")
     print(f"\n샘플:\n{dataset.tail()}")
 
-    dataset.to_csv("005930_features.csv")
-    print("\n저장 완료: 005930_features.csv")
+    dataset.to_csv(DATA_DIR / "005930_features.csv")
+    print(f"\n저장 완료: {DATA_DIR / '005930_features.csv'}")

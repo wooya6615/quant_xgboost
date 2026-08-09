@@ -24,6 +24,8 @@
     python feature_engineering_investor.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -34,6 +36,9 @@ load_dotenv()  # .env 파일에서 KRX_ID / KRX_PW를 읽어와 os.environ에 �
 from pykrx import stock
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -176,7 +181,7 @@ def build_multi_horizon_datasets(
         label_dist = dataset["label"].value_counts(normalize=True).to_dict()
         print(f"  shape: {dataset.shape}, 라벨 분포: {label_dist}")
 
-        out_path = f"{ticker_krx}_features_with_investor_h{horizon}.csv"
+        out_path = DATA_DIR / f"{ticker_krx}_features_with_investor_h{horizon}.csv"
         dataset.to_csv(out_path)
         print(f"  저장 완료: {out_path}")
 

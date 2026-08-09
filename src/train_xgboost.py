@@ -6,10 +6,14 @@ nvda_features.csv를 이용한 XGBoost 방향성 분류 모델 학습
     python train_xgboost.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS = [
@@ -23,7 +27,8 @@ FEATURE_COLS = [
 # ------------------------------------------------------------------
 # 1. 데이터 로드
 # ------------------------------------------------------------------
-def load_dataset(path: str = "nvda_features.csv") -> pd.DataFrame:
+def load_dataset(path: str = None) -> pd.DataFrame:
+    path = path or DATA_DIR / "nvda_features.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()  # 시간순 정렬 확인 (필수)
     df = df.replace([np.inf, -np.inf], np.nan).dropna()  # inf 방어

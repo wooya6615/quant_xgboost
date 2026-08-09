@@ -32,6 +32,7 @@
 import sys
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -64,8 +65,10 @@ XGB_PARAMS = dict(
     random_state=42,  # ablation 기본 시드와 동일 -- 배포 모델도 하나의 시드로 고정
 )
 
-MODEL_PATH = f"final_model_{TICKER_KRX}_h{HORIZON}.joblib"
-METADATA_PATH = f"final_model_{TICKER_KRX}_h{HORIZON}_metadata.json"
+MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_PATH = MODEL_DIR / f"final_model_{TICKER_KRX}_h{HORIZON}.joblib"
+METADATA_PATH = MODEL_DIR / f"final_model_{TICKER_KRX}_h{HORIZON}_metadata.json"
 
 
 # ------------------------------------------------------------------

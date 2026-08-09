@@ -18,6 +18,8 @@
     python feature_engineering_valuation.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -26,6 +28,9 @@ load_dotenv()  # ⚠️ pykrx import보다 반드시 먼저 실행
 from pykrx import stock
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -143,7 +148,7 @@ def build_multi_horizon_valuation_datasets(
 
         print(f"  shape: {result.shape}, 라벨 분포: {result['label'].value_counts(normalize=True).to_dict()}")
 
-        out_path = f"{ticker_krx}_features_with_valuation_h{horizon}.csv"
+        out_path = DATA_DIR / f"{ticker_krx}_features_with_valuation_h{horizon}.csv"
         result.to_csv(out_path)
         print(f"  저장 완료: {out_path}\n")
 

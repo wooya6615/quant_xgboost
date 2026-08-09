@@ -26,6 +26,8 @@
     python feature_engineering_foreign_ownership.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -35,6 +37,9 @@ load_dotenv()  # pykrx import 전에 반드시 먼저 실행 (KRX_ID/KRX_PW 로�
 from pykrx import stock
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -167,7 +172,7 @@ def build_multi_horizon_datasets_foreign_ownership(
         print(f"[horizon={horizon}] shape={merged.shape}")
 
         if save:
-            out_path = f"{ticker_krx}_features_with_foreign_own_h{horizon}.csv"
+            out_path = DATA_DIR / f"{ticker_krx}_features_with_foreign_own_h{horizon}.csv"
             merged.to_csv(out_path)
             print(f"  저장 완료: {out_path}")
 

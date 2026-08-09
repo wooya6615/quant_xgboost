@@ -9,8 +9,13 @@
     python feature_engineering_pooled.py
 """
 
+from pathlib import Path
+
 import pandas as pd
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # 같은 섹터(반도체/AI)로 묶음 -- 가격 패턴이 비슷할 테니
@@ -52,5 +57,5 @@ if __name__ == "__main__":
     print(f"\n종목별 행 개수:\n{pooled['ticker'].value_counts()}")
     print(f"\n전체 라벨 분포:\n{pooled['label'].value_counts(normalize=True)}")
 
-    pooled.to_csv("pooled_features.csv")
-    print("\n저장 완료: pooled_features.csv")
+    pooled.to_csv(DATA_DIR / "pooled_features.csv")
+    print(f"\n저장 완료: {DATA_DIR / 'pooled_features.csv'}")

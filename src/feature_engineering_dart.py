@@ -27,6 +27,8 @@ DART 공시 빈도 feature를 기존 feature_engineering.py 결과에 붙이는 
 """
 
 import time
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -37,6 +39,9 @@ load_dotenv()  # DART_API_KEY를 OpenDartReader 생성 전에 반드시 먼저 �
 from opendartreader import OpenDartReader
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -180,7 +185,7 @@ def build_multi_horizon_datasets_dart(
         print(f"[horizon={horizon}] shape={merged.shape}")
 
         if save:
-            out_path = f"{ticker_krx}_features_with_dart_h{horizon}.csv"
+            out_path = DATA_DIR / f"{ticker_krx}_features_with_dart_h{horizon}.csv"
             merged.to_csv(out_path)
             print(f"  저장 완료: {out_path}")
 

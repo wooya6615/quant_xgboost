@@ -23,6 +23,7 @@
 
 import time
 import datetime as dt
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -32,6 +33,9 @@ load_dotenv()  # ⚠️ pykrx.website import보다 반드시 먼저 실행
 from pykrx.website import krx
 
 from feature_engineering import build_feature_dataset
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 CHUNK_DAYS = 600           # 확인된 한계(730일)보다 여유 있게 잡은 청크 크기
@@ -207,7 +211,7 @@ def build_multi_horizon_short_datasets(
         label_dist = result["label"].value_counts(normalize=True).to_dict()
         print(f"  shape: {result.shape}, 라벨 분포: {label_dist}")
 
-        out_path = f"{ticker_krx}_features_with_short_kr_h{horizon}.csv"
+        out_path = DATA_DIR / f"{ticker_krx}_features_with_short_kr_h{horizon}.csv"
         result.to_csv(out_path)
         print(f"  저장 완료: {out_path}\n")
 

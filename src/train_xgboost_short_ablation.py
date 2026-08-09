@@ -1,27 +1,27 @@
 """
-DART 대량보유상황보고서(5% Rule) feature 추가 전/후 성능을 비교하는 ablation 스크립트
-(train_xgboost_ablation_dart.py를 리네이밍 -- 구조/로직은 100% 동일, DART -> MAJOR_HOLDER)
+공매도(국내, pykrx 청크 복원) feature 추가 전/후 성능을 비교하는 ablation 스크립트
 
-⚠️ 표본 희소성 주의:
-    현대로템 기준 11.5년간 총 31건(연평균 2.7건)의 이벤트만 존재함. 이 정도 희소성이면
-    walk-forward의 test_size=60(영업일)짜리 fold 중 상당수가 "이벤트가 아예 없는 기간"일
-    가능성이 높음 -- 그 경우 major_holder_count_20d/60d, flag_20d는 거의 항상 0으로 고정된
-    feature가 되어 모델이 학습할 변동성 자체가 부족할 수 있음. AUC가 안 나오거나 노이즈만
-    나온다면 "신호가 없다"보다는 "표본이 부족해서 검증 자체가 어렵다"에 가까운 결론으로
-    해석해야 함 (다른 실험들의 "신호 없음" 결론과는 성격이 다름).
+[수정] 361행(fold 6개) 시절 축소했던 train_size=150/test_size=30을 원래 규모로 복원.
+    2015~2026 전체 이력(2796행, feature_engineering_short_kr.py로 복원)을 쓰면
+    수급 실험과 동일하게 train_size=300/test_size=60/step=60 기준으로 fold 41개 수준이 나옴.
+    horizon 스윕(1/3/5/10일)도 investor 실험과 동일한 구조로 지원.
 
 사용법:
-    python train_xgboost_ablation_major_holder.py
+    python train_xgboost_short_ablation.py
 
 전제:
-    feature_engineering_dart_major_holder.py를 먼저 실행해서
-    {ticker_krx}_features_with_major_holder_h{horizon}.csv 들이 만들어져 있어야 함.
+    feature_engineering_short_kr.py의 build_multi_horizon_short_datasets()로
+    {ticker_krx}_features_with_short_kr_h{horizon}.csv 들이 만들어져 있어야 함.
 """
+
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 FEATURE_COLS_BASE = [
@@ -31,14 +31,12 @@ FEATURE_COLS_BASE = [
     "excess_return_5d", "excess_return_20d",
 ]
 
-FEATURE_COLS_MAJOR_HOLDER = [
-    "major_holder_count_20d", "major_holder_count_60d",
-    "major_holder_flag_20d", "days_since_major_holder_filing",
+FEATURE_COLS_SHORT = [
+    "short_qty_3d", "short_qty_5d", "short_weight_5d_avg", "short_covering_signal",
 ]
 
-FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_MAJOR_HOLDER
-
-FEATURE_COLS_MAJOR_HOLDER_ONLY = FEATURE_COLS_MAJOR_HOLDER
+FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_SHORT
+FEATURE_COLS_SHORT_ONLY = FEATURE_COLS_SHORT
 
 DEFAULT_HORIZON = 5
 
@@ -47,7 +45,7 @@ DEFAULT_HORIZON = 5
 # 1. 데이터 로드
 # ------------------------------------------------------------------
 def load_dataset(ticker_krx: str = "064350", horizon: int = DEFAULT_HORIZON) -> pd.DataFrame:
-    path = f"{ticker_krx}_features_with_major_holder_h{horizon}.csv"
+    path = DATA_DIR / f"{ticker_krx}_features_with_short_kr_h{horizon}.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
     df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=FEATURE_COLS_COMBINED + ["label"])
@@ -71,6 +69,7 @@ def walk_forward_splits(n_rows: int, train_size: int, test_size: int, step: int,
 
 # ------------------------------------------------------------------
 # 3. fold별 학습 + 평가
+#    [수정] train_size/test_size/step 기본값을 원래 규모(300/60/60)로 복원
 # ------------------------------------------------------------------
 def run_walk_forward(df: pd.DataFrame, feature_cols: list, embargo: int, train_size=300, test_size=60,
                       step=60, threshold=0.5, random_state=42):
@@ -79,7 +78,11 @@ def run_walk_forward(df: pd.DataFrame, feature_cols: list, embargo: int, train_s
 
     splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
     if not splits:
-        raise ValueError("데이터가 부족해서 walk-forward split을 만들 수 없어요. train_size/test_size를 줄이세요.")
+        raise ValueError(
+            f"데이터가 부족해서 walk-forward split을 만들 수 없어요. "
+            f"(n_rows={len(df)}, train_size={train_size}, test_size={test_size}, embargo={embargo}) "
+            f"train_size/test_size를 줄이세요."
+        )
 
     fold_rows = []
     importances = []
@@ -126,37 +129,33 @@ def run_walk_forward(df: pd.DataFrame, feature_cols: list, embargo: int, train_s
 
 
 # ------------------------------------------------------------------
-# 4. BASE vs COMBINED 비교
+# 4. BASE vs SHORT_ONLY vs COMBINED 비교
 # ------------------------------------------------------------------
 def compare_feature_sets(df: pd.DataFrame, horizon: int, random_state=42, **wfo_kwargs):
     base_fold_df, base_importance = run_walk_forward(df, FEATURE_COLS_BASE, embargo=horizon, random_state=random_state, **wfo_kwargs)
-    mh_fold_df, mh_importance = run_walk_forward(df, FEATURE_COLS_MAJOR_HOLDER_ONLY, embargo=horizon, random_state=random_state, **wfo_kwargs)
+    short_fold_df, short_importance = run_walk_forward(df, FEATURE_COLS_SHORT_ONLY, embargo=horizon, random_state=random_state, **wfo_kwargs)
     combined_fold_df, combined_importance = run_walk_forward(df, FEATURE_COLS_COMBINED, embargo=horizon, random_state=random_state, **wfo_kwargs)
 
     metrics = ["accuracy", "vs_base_rate", "precision", "recall", "auc"]
     summary = pd.DataFrame({
         "BASE": base_fold_df[metrics].mean(),
-        "MAJOR_HOLDER_ONLY": mh_fold_df[metrics].mean(),
+        "SHORT_ONLY": short_fold_df[metrics].mean(),
         "COMBINED": combined_fold_df[metrics].mean(),
     })
-    summary["MAJOR_HOLDER_ONLY-BASE"] = summary["MAJOR_HOLDER_ONLY"] - summary["BASE"]
+    summary["SHORT_ONLY-BASE"] = summary["SHORT_ONLY"] - summary["BASE"]
     summary["COMBINED-BASE"] = summary["COMBINED"] - summary["BASE"]
-
-    base_win_folds = (base_fold_df["vs_base_rate"] > 0).sum()
-    mh_win_folds = (mh_fold_df["vs_base_rate"] > 0).sum()
-    combined_win_folds = (combined_fold_df["vs_base_rate"] > 0).sum()
 
     return {
         "base_fold_df": base_fold_df,
-        "mh_fold_df": mh_fold_df,
+        "short_fold_df": short_fold_df,
         "combined_fold_df": combined_fold_df,
         "summary": summary,
         "base_importance": base_importance,
-        "mh_importance": mh_importance,
+        "short_importance": short_importance,
         "combined_importance": combined_importance,
-        "base_win_folds": base_win_folds,
-        "mh_win_folds": mh_win_folds,
-        "combined_win_folds": combined_win_folds,
+        "base_win_folds": (base_fold_df["vs_base_rate"] > 0).sum(),
+        "short_win_folds": (short_fold_df["vs_base_rate"] > 0).sum(),
+        "combined_win_folds": (combined_fold_df["vs_base_rate"] > 0).sum(),
         "n_folds": len(base_fold_df),
     }
 
@@ -176,7 +175,7 @@ def run_multi_seed(df: pd.DataFrame, horizon: int, seeds=(42, 1, 7, 123, 2024), 
             "BASE_vs_base_rate": result["summary"].loc["vs_base_rate", "BASE"],
             "COMBINED_vs_base_rate": result["summary"].loc["vs_base_rate", "COMBINED"],
             "COMBINED_vsbase_diff": result["summary"].loc["vs_base_rate", "COMBINED-BASE"],
-            "MAJOR_HOLDER_auc": result["summary"].loc["auc", "MAJOR_HOLDER_ONLY"],
+            "SHORT_ONLY_auc": result["summary"].loc["auc", "SHORT_ONLY"],
             "n_folds": result["n_folds"],
         })
     return pd.DataFrame(rows)
@@ -185,7 +184,7 @@ def run_multi_seed(df: pd.DataFrame, horizon: int, seeds=(42, 1, 7, 123, 2024), 
 # ------------------------------------------------------------------
 # 6. Horizon 스윕
 # ------------------------------------------------------------------
-def run_horizon_sweep(ticker_krx: str, horizons: list = None, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
+def run_horizon_sweep(ticker_krx: str, horizons: list[int] = None, seeds=(42, 1, 7, 123, 2024), **wfo_kwargs):
     if horizons is None:
         horizons = [1, 3, 5, 10]
 
@@ -200,19 +199,23 @@ def run_horizon_sweep(ticker_krx: str, horizons: list = None, seeds=(42, 1, 7, 1
         try:
             df = load_dataset(ticker_krx=ticker_krx, horizon=horizon)
         except FileNotFoundError:
-            print(f"  {ticker_krx}_features_with_major_holder_h{horizon}.csv 없음 -- "
-                  f"feature_engineering_dart_major_holder.py를 먼저 실행하세요.")
+            print(f"  {ticker_krx}_features_with_short_kr_h{horizon}.csv 없음 -- "
+                  f"feature_engineering_short_kr.py의 build_multi_horizon_short_datasets()를 먼저 실행하세요.")
             continue
 
         n_rows = len(df)
         label_rate = df["label"].mean()
         print(f"  데이터: {n_rows}행, label=1 비율 {label_rate:.3f}")
 
-        seed_df = run_multi_seed(df, horizon=horizon, seeds=seeds, **wfo_kwargs)
-        seed_details[horizon] = seed_df
+        try:
+            seed_df = run_multi_seed(df, horizon=horizon, seeds=seeds, **wfo_kwargs)
+        except ValueError as e:
+            print(f"  {e}")
+            continue
 
-        combined_beats_base_count = (seed_df["COMBINED_auc_diff"] > 0).sum()
+        seed_details[horizon] = seed_df
         n_seeds = len(seed_df)
+        combined_beats_base_count = (seed_df["COMBINED_auc_diff"] > 0).sum()
 
         horizon_rows.append({
             "horizon": horizon,
@@ -222,34 +225,47 @@ def run_horizon_sweep(ticker_krx: str, horizons: list = None, seeds=(42, 1, 7, 1
             "COMBINED_auc_diff_mean": seed_df["COMBINED_auc_diff"].mean(),
             "COMBINED_auc_diff_std": seed_df["COMBINED_auc_diff"].std(),
             "COMBINED_beats_BASE_seeds": f"{combined_beats_base_count}/{n_seeds}",
-            "MAJOR_HOLDER_auc_mean": seed_df["MAJOR_HOLDER_auc"].mean(),
+            "SHORT_ONLY_auc_mean": seed_df["SHORT_ONLY_auc"].mean(),
         })
 
-    horizon_summary = pd.DataFrame(horizon_rows)
-    return horizon_summary, seed_details
+    return pd.DataFrame(horizon_rows), seed_details
 
 
 if __name__ == "__main__":
     TICKER_KRX = "064350"  # 현대로템
 
+    # (A) 단일 horizon (기존 방식, fold 41개 수준으로 복원됐는지 우선 확인)
     print("=" * 60)
     print(f"=== 단일 horizon 확인 (horizon={DEFAULT_HORIZON}) ===")
     print("=" * 60)
 
     df = load_dataset(ticker_krx=TICKER_KRX, horizon=DEFAULT_HORIZON)
     print(f"전체 데이터: {df.shape[0]}행\n")
-    print(f"[표본 희소성 체크] flag_20d=1인 행 비율: {(df['major_holder_flag_20d'] == 1).mean():.1%}")
 
     result = compare_feature_sets(df, horizon=DEFAULT_HORIZON)
-    print("\n=== 전체 평균 비교 (fold 평균) ===")
+    print("=== 전체 평균 비교 (fold 평균) ===")
     print(result["summary"].round(4))
     print(f"\n베이스라인 이긴 fold 수 (fold 총 {result['n_folds']}개)")
-    print(f"  BASE:               {result['base_win_folds']} / {result['n_folds']}")
-    print(f"  MAJOR_HOLDER_ONLY:  {result['mh_win_folds']} / {result['n_folds']}")
-    print(f"  COMBINED:           {result['combined_win_folds']} / {result['n_folds']}")
+    print(f"  BASE:        {result['base_win_folds']} / {result['n_folds']}")
+    print(f"  SHORT_ONLY:  {result['short_win_folds']} / {result['n_folds']}")
+    print(f"  COMBINED:    {result['combined_win_folds']} / {result['n_folds']}")
 
+    # (B) 멀티 시드 (단일 horizon)
+    print("\n" + "#" * 60)
+    print("# 멀티 시드 검증 (5개 시드, horizon=5)")
+    print("#" * 60)
+    seed_df = run_multi_seed(df, horizon=DEFAULT_HORIZON)
+    print(seed_df.round(4).to_string(index=False))
+
+    combined_beats_base_count = (seed_df["COMBINED_auc_diff"] > 0).sum()
+    n_seeds = len(seed_df)
+    print(f"\nCOMBINED가 BASE보다 AUC 높았던 시드: {combined_beats_base_count} / {n_seeds}")
+    print(f"AUC 차이 평균: {seed_df['COMBINED_auc_diff'].mean():+.4f} "
+          f"(표준편차 {seed_df['COMBINED_auc_diff'].std():.4f})")
+
+    # (C) Horizon 스윕 (1/3/5/10일)
     print("\n\n" + "#" * 60)
-    print("# Horizon 스윕 (1/3/5/10일 자동 비교)")
+    print("# Horizon 스윕 (1/3/5/10일)")
     print("#" * 60)
 
     horizon_summary, seed_details = run_horizon_sweep(ticker_krx=TICKER_KRX)
@@ -259,15 +275,8 @@ if __name__ == "__main__":
     print("=" * 60)
     print(horizon_summary.round(4).to_string(index=False))
 
-    print("\n" + "=" * 60)
-    print("=== 판정 ===")
-    print("=" * 60)
     if not horizon_summary.empty:
         best_row = horizon_summary.loc[horizon_summary["COMBINED_auc_diff_mean"].idxmax()]
-        print(f"COMBINED-BASE AUC 차이가 가장 큰 horizon: {int(best_row['horizon'])}일 "
+        print(f"\nCOMBINED-BASE AUC 차이가 가장 큰 horizon: {int(best_row['horizon'])}일 "
               f"(평균 {best_row['COMBINED_auc_diff_mean']:+.4f}, 표준편차 {best_row['COMBINED_auc_diff_std']:.4f})")
-        print("→ 표준편차가 평균의 절반을 넘으면 그 horizon 결과는 노이즈에 가까우니 주의.")
-        print("→ 표본이 희소한 feature이므로(연평균 2.7건), 결과가 약하게 나와도 '신호 없음'이 아니라")
-        print("  '표본 부족으로 검증력 자체가 낮음'일 수 있음을 감안할 것.")
-    else:
-        print("사용 가능한 horizon 데이터셋이 없음 -- 먼저 feature_engineering_dart_major_holder.py를 실행하세요.")
+        print("→ 표준편차가 평균의 절반을 넘으면 노이즈 가능성 높음. fold 개수도 같이 확인할 것.")

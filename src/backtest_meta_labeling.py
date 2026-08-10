@@ -10,7 +10,7 @@ Meta-labeling 백테스트: 1차 신호(모멘텀 부호)를 필터 없이 그�
     python src/backtest_meta_labeling.py
 
 전제:
-    feature_engineering_meta_labeling.py로 084010_features_meta_labeling.csv가
+    feature_engineering_meta_labeling.py로 064350_features_meta_labeling.csv가
     먼저 생성돼 있어야 함.
 """
 
@@ -36,7 +36,7 @@ NUM_DAYS = 10  # feature_engineering_meta_labeling.py와 동일하게 맞출 것
 HORIZON_FOR_EMBARGO = NUM_DAYS
 
 
-def load_dataset(ticker_krx: str = "084010") -> pd.DataFrame:
+def load_dataset(ticker_krx: str = "064350") -> pd.DataFrame:
     path = DATA_DIR / f"{ticker_krx}_features_meta_labeling_nd{NUM_DAYS}.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     df = df.sort_index()
@@ -159,7 +159,7 @@ def summarize(trades: pd.DataFrame, df: pd.DataFrame, label: str, show_yearly: b
 
 
 if __name__ == "__main__":
-    df = load_dataset("084010")
+    df = load_dataset("064350")
     print(f"데이터: {df.shape[0]}행 ({df.index.min().date()} ~ {df.index.max().date()})")
 
     print("\n=== 1차 신호 무필터 (baseline -- 항상 모멘텀 부호대로 거래) ===")

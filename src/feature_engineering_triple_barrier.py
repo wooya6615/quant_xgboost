@@ -1,5 +1,5 @@
 """
-Triple-barrier 라벨 버전 BASE feature 데이터셋 생성 (대한제강 084010, BASE, h=20 기준).
+Triple-barrier 라벨 버전 BASE feature 데이터셋 생성 (현대로템 064350, BASE, h=20 기준).
 
 기존 feature_engineering.py의 add_label()(고정 horizon 이진분류)은 비교 기준선으로
 그대로 남겨두고, labeling_triple_barrier.py의 triple-barrier 방식으로 새 라벨을
@@ -48,11 +48,11 @@ FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_25
 
 
 def build_triple_barrier_dataset(
-    ticker: str = "084010.KS",
+    ticker: str = "064350.KS",
     benchmark: str = "^KS11",
     start: str = "2015-01-01",
     end: str = "2026-07-18",
-    horizon_fixed: int = 20,        # 기존 검증된 대한제강 BASE 설정과 동일
+    horizon_fixed: int = 20,        # 기존 검증된 현대로템 BASE 설정과 동일
     cost_threshold: float = 0.012,  # 기존 h=20 실험 임계값과 동일 (DEFAULT_HORIZON_COST_MAP[20])
     pt_sl: tuple = (1, 1),          # 익절/손절 배수 -- 대칭 배리어로 시작 (추후 스윕 가능)
     vol_span: int = 20,
@@ -105,8 +105,8 @@ def build_triple_barrier_dataset(
 
 
 def build_triple_barrier_dataset_combined(
-    ticker: str = "084010.KS",
-    ticker_krx: str = "084010",
+    ticker: str = "064350.KS",
+    ticker_krx: str = "064350",
     benchmark: str = "^KS11",
     start: str = "2015-01-01",
     end: str = "2026-07-18",
@@ -118,8 +118,9 @@ def build_triple_barrier_dataset_combined(
 ) -> pd.DataFrame:
     """
     BASE + VALUATION(PER/PBR/DIV, z-score 포함) feature까지 합친 triple-barrier 데이터셋.
-    대한제강은 기존 밸류에이션 ablation에서 가장 강한 신호(COMBINED-BASE AUC diff +0.0585,
-    단독 AUC 0.675)를 보였던 조합이라, triple-barrier 라벨과 결합해도 재현되는지 확인.
+    현대로템은 기존 밸류에이션 ablation에서 h=20 기준 COMBINED-BASE AUC가 단조증가하며
+    5/5 시드로 개선됐고, 2025년(이례적 강세장) 제외해도 백테스트 우위가 재현됐던 조합
+    (PROJECT_SUMMARY.md 2-3절 참고, 정확한 AUC diff 수치는 대한제강과 달리 기록 안 됨).
     feature_engineering_valuation.py의 load_valuation()/add_valuation_features()를 그대로 재사용.
     """
     df, bench = load_data(ticker, benchmark, start, end)
@@ -163,14 +164,16 @@ def build_triple_barrier_dataset_combined(
 
 
 if __name__ == "__main__":
-    TICKER = "084010.KS"
-    TICKER_KRX = "084010"
-    PT_SL = (2, 1)  # 1:2 손익비 -- 손절 대비 익절을 2배 넓게 (변동성 스케일링은 이전과 동일하게 유지)
+    TICKER = "052690.KS"
+    TICKER_KRX = "052690"
+    PT_SL = (2, 1)   # 1:2 손익비 -- 손절 대비 익절을 2배 넓게 (현대로템 검증 때와 동일)
+    NUM_DAYS = 20    # [원복] 10 -> 20 -- 전략 자체는 안 바꾸고 종목만 바꿔서 깨끗하게 재현성 테스트
+    CONFIG_LABEL = f"pt{PT_SL[0]}sl{PT_SL[1]}_nd{NUM_DAYS}"
 
-    print("=== BASE ===")
-    dataset = build_triple_barrier_dataset(ticker=TICKER, pt_sl=PT_SL)
+    print(f"=== BASE ({TICKER_KRX}, {CONFIG_LABEL}) ===")
+    dataset = build_triple_barrier_dataset(ticker=TICKER, pt_sl=PT_SL, num_days=NUM_DAYS)
     print(f"생성된 데이터셋 shape: {dataset.shape}")
-    print(f"pt_sl 설정: {PT_SL} (손절 1배, 익절 2배 -- 변동성은 daily_vol * sqrt(num_days) 기준)")
+    print(f"설정: pt_sl={PT_SL}, num_days={NUM_DAYS} (변동성은 daily_vol * sqrt(num_days) 기준)")
 
     print(f"\n기존 고정 horizon 라벨(label_fixed) 분포:\n{dataset['label_fixed'].value_counts(normalize=True)}")
     tb_dist = dataset['label_tb'].value_counts(normalize=True)
@@ -183,13 +186,13 @@ if __name__ == "__main__":
     agreement = (dataset["label_fixed"] == label_tb_binary).mean()
     print(f"\n두 라벨의 방향 일치율: {agreement:.1%} (참고용 -- 낮다고 나쁜 건 아님, 정의 자체가 다름)")
 
-    out_path = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_pt{PT_SL[0]}sl{PT_SL[1]}.csv"
+    out_path = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_{CONFIG_LABEL}.csv"
     dataset.to_csv(out_path)
     print(f"저장 완료: {out_path}")
 
-    print("\n=== COMBINED (BASE + VALUATION) ===")
+    print(f"\n=== COMBINED (BASE + VALUATION), {CONFIG_LABEL} ===")
     dataset_combined = build_triple_barrier_dataset_combined(
-        ticker=TICKER, ticker_krx=TICKER_KRX, pt_sl=PT_SL,
+        ticker=TICKER, ticker_krx=TICKER_KRX, pt_sl=PT_SL, num_days=NUM_DAYS,
     )
     print(f"생성된 데이터셋 shape: {dataset_combined.shape} "
           f"(BASE 대비 {dataset.shape[0] - dataset_combined.shape[0]}행 감소 -- "
@@ -198,6 +201,6 @@ if __name__ == "__main__":
     tb_dist_combined = dataset_combined['label_tb'].value_counts(normalize=True)
     print(f"\ntriple-barrier 라벨(label_tb) 분포 (COMBINED):\n{tb_dist_combined}")
 
-    out_path_combined = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_pt{PT_SL[0]}sl{PT_SL[1]}_valuation.csv"
+    out_path_combined = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_{CONFIG_LABEL}_valuation.csv"
     dataset_combined.to_csv(out_path_combined)
     print(f"저장 완료: {out_path_combined}")

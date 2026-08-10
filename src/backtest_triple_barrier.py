@@ -12,8 +12,8 @@ label_tb_binary가 5/5 시드 AUC 개선을 보였다고 여기서 끝내지 않
     python src/backtest_triple_barrier.py
 
 전제:
-    feature_engineering_triple_barrier.py로 084010_features_triple_barrier_pt2sl1.csv가
-    먼저 생성돼 있어야 함.
+    feature_engineering_triple_barrier.py로 052690_features_triple_barrier_pt2sl1_nd20.csv가
+    먼저 생성돼 있어야 함 (CONFIG_LABEL 상수 참고).
 """
 
 from pathlib import Path
@@ -33,11 +33,15 @@ FEATURE_COLS_BASE = [
 
 FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d"]
 
+TICKER_KRX = "052690"     # 종목 바꿀 땐 이것만 수정 (한전기술 -- 종목만 바꾼 깨끗한 재현성 테스트)
+CONFIG_LABEL = "pt2sl1_nd20"  # feature_engineering_triple_barrier.py와 동일하게 맞출 것 (num_days 원복)
+NUM_DAYS = 20              # CONFIG_LABEL의 nd 숫자와 동일하게 맞출 것 (embargo에 사용)
+
 ROUND_TRIP_COST = 0.002  # 왕복 거래비용 0.2% -- 기존 실험들과 동일 가정
-HORIZON_FOR_EMBARGO = 20  # 데이터 생성 시 num_days=20으로 만들었으므로 동일하게 embargo
+HORIZON_FOR_EMBARGO = NUM_DAYS
 
 
-def load_dataset(ticker_krx: str = "084010", pt_sl_label: str = "pt2sl1",
+def load_dataset(ticker_krx: str = TICKER_KRX, pt_sl_label: str = CONFIG_LABEL,
                   combined: bool = False) -> pd.DataFrame:
     suffix = "_valuation" if combined else ""
     path = DATA_DIR / f"{ticker_krx}_features_triple_barrier_{pt_sl_label}{suffix}.csv"
@@ -109,7 +113,7 @@ def generate_trades(df: pd.DataFrame, feature_cols: list = None, threshold: floa
     return pd.DataFrame(trades)
 
 
-def summarize(trades: pd.DataFrame, df: pd.DataFrame) -> dict:
+def summarize(trades: pd.DataFrame, df: pd.DataFrame, show_top_year_exclusion: bool = False) -> dict:
     if trades.empty:
         print("거래가 하나도 생성되지 않았어 -- threshold를 낮추거나 데이터 기간을 늘려볼 것.")
         return {"n_trades": 0, "total_net": None}
@@ -130,6 +134,7 @@ def summarize(trades: pd.DataFrame, df: pd.DataFrame) -> dict:
     print(f"Buy & Hold 대비: {'이김' if total_net > bh_return else '못 이김'}")
 
     print("\n=== 연도별 분해 (국면 집중도 확인) ===")
+    trades = trades.copy()
     trades["year"] = trades["entry_date"].dt.year
     yearly = trades.groupby("year")["net_return"].agg(["count", "sum", "mean"])
     yearly.columns = ["거래수", "연간합계수익률", "거래당평균수익률"]
@@ -141,6 +146,13 @@ def summarize(trades: pd.DataFrame, df: pd.DataFrame) -> dict:
         top_year_share = yearly["연간합계수익률"].abs().max() / yearly["연간합계수익률"].abs().sum()
         print(f"\n최대 기여 연도의 비중: {top_year_share:.1%} "
               f"(50% 넘으면 기존 판정기준상 '국면 의존적'으로 봄)")
+
+    if show_top_year_exclusion:
+        top_year = yearly["연간합계수익률"].idxmax()
+        excl_trades = trades[trades["year"] != top_year]
+        if not excl_trades.empty:
+            excl_net = (1 + excl_trades["net_return"]).prod() - 1
+            print(f"최대 기여 연도({top_year}) 제외 시 net: {excl_net:.1%} (원래 {total_net:.1%})")
 
     return {
         "n_trades": len(trades), "win_rate": win_rate,
@@ -161,14 +173,14 @@ def run_threshold_sweep(df: pd.DataFrame, feature_cols: list, thresholds: list) 
 
 
 if __name__ == "__main__":
-    print("=== BASE ===")
-    df = load_dataset("084010", combined=False)
+    print(f"=== BASE ({TICKER_KRX}, {CONFIG_LABEL}) ===")
+    df = load_dataset(TICKER_KRX, combined=False)
     print(f"데이터: {df.shape[0]}행 ({df.index.min().date()} ~ {df.index.max().date()})\n")
     trades = generate_trades(df, feature_cols=FEATURE_COLS_BASE)
     summarize(trades, df)
 
     print("\n\n=== COMBINED (BASE + VALUATION) -- threshold 스윕 ===")
-    df_combined = load_dataset("084010", combined=True)
+    df_combined = load_dataset(TICKER_KRX, combined=True)
     print(f"데이터: {df_combined.shape[0]}행 "
           f"({df_combined.index.min().date()} ~ {df_combined.index.max().date()})")
 
@@ -180,3 +192,67 @@ if __name__ == "__main__":
           .round(4).to_string(index=False))
     print("\n판정: net이 threshold를 높일수록 개선되면 '거래비용 과다'가 진짜 원인이었다는 뜻.")
     print("거래 수가 너무 적어지면(예: 10건 미만) 통계적으로 믿기 어려우니 그 지점도 같이 볼 것.")
+
+    # ------------------------------------------------------------------
+    # 여기서 끝내지 않고, 가장 성과 좋았던 threshold=0.65를 5-seed로 재검증.
+    # 거래 수가 95~113건으로, 지난번 대한제강 meta-labeling에서 seed=42만
+    # 우연히 좋았던 사례(120건)와 비슷한 규모라 반드시 거쳐야 하는 단계.
+    # ------------------------------------------------------------------
+    print("\n\n" + "=" * 60)
+    print("=== 검증: COMBINED threshold=0.65의 5-seed 재현성 ===")
+    print("=" * 60)
+    SEEDS = [42, 1, 7, 123, 2024]
+    seed_results = []
+    for seed in SEEDS:
+        print(f"\n--- seed={seed} ---")
+        trades_seed = generate_trades(
+            df_combined, feature_cols=FEATURE_COLS_BASE + FEATURE_COLS_VALUATION,
+            threshold=0.65, random_state=seed,
+        )
+        r = summarize(trades_seed, df_combined, show_top_year_exclusion=(seed == 42))
+        r["seed"] = seed
+        seed_results.append(r)
+
+    seed_df = pd.DataFrame(seed_results)
+    print("\n--- 5-seed 요약 ---")
+    print(seed_df[["seed", "n_trades", "total_net", "bh_return"]].round(4).to_string(index=False))
+    win_count = (seed_df["total_net"] > seed_df["bh_return"]).sum()
+    print(f"\n5개 시드 중 Buy & Hold를 이긴 시드: {win_count}/5")
+    print("판정: 5/5 또는 4/5 이겨야 '진짜' -- 대한제강 meta-labeling 사례(2/5 -> 0/5로 무너짐)를")
+    print("기억할 것. 여기서도 무너지면 같은 패턴(소표본 우연)이 종목만 바뀌어 반복된 셈.")
+
+    # ------------------------------------------------------------------
+    # [수정] 처음엔 2025년 "행만" 빼고 2018~2026을 이어붙였는데, 이러면 Buy & Hold가
+    # 여전히 진입일(2018)~청산일(2026) 종가 차이로 계산되면서 2025년의 실제 가격
+    # 상승분을 그대로 반영해버림 (행을 지운다고 과거 사실인 주가 이력 자체가 바뀌지
+    # 않으므로). 전략은 2025년에 거래를 못 하게 막혔는데 Buy & Hold는 2025년 이득을
+    # 그대로 챙기는 불공정한 비교가 됐던 것 -- 실제로 bh_return이 672~720%로 원래
+    # (691.6%)와 거의 그대로 나온 게 그 증거.
+    #
+    # 올바른 방법: 중간에서 빼는 게 아니라 2024년 말에서 데이터 자체를 잘라내서,
+    # 전략과 Buy & Hold 둘 다 "2025년이 오기 전"까지만 보게 만듦.
+    # ------------------------------------------------------------------
+    print("\n\n" + "=" * 60)
+    print("=== 최종 검증: 2025년 이전으로 데이터 자체를 잘라서 5-seed 재검증 ===")
+    print("=" * 60)
+    df_before_2025 = df_combined[df_combined.index < "2025-01-01"]
+    print(f"2025년 이전 데이터: {df_before_2025.shape[0]}행 (원래 {df_combined.shape[0]}행)")
+
+    excl_results = []
+    for seed in SEEDS:
+        print(f"\n--- seed={seed} (2025년 이전까지만) ---")
+        trades_excl = generate_trades(
+            df_before_2025, feature_cols=FEATURE_COLS_BASE + FEATURE_COLS_VALUATION,
+            threshold=0.65, random_state=seed,
+        )
+        r = summarize(trades_excl, df_before_2025)
+        r["seed"] = seed
+        excl_results.append(r)
+
+    excl_df = pd.DataFrame(excl_results)
+    print("\n--- 2025년 이전 5-seed 요약 ---")
+    print(excl_df[["seed", "n_trades", "total_net", "bh_return"]].round(4).to_string(index=False))
+    excl_win_count = (excl_df["total_net"] > excl_df["bh_return"]).sum()
+    print(f"\n2025년 이전 기준 5개 시드 중 Buy & Hold를 이긴 시드: {excl_win_count}/5")
+    print("최종 판정: 여기서도 4~5/5로 이기면 2025는 '보너스'였을 뿐 진짜 edge -- 반대로")
+    print("여기서 무너지면(0~2/5) 원래 결과 전체가 2025년 국면 하나에 기댄 것으로 결론.")

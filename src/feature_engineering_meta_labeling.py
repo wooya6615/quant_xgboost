@@ -1,5 +1,5 @@
 """
-Meta-labeling 데이터셋 생성 (대한제강 084010, BASE+VALUATION, 1:2 손익비).
+Meta-labeling 데이터셋 생성 (현대로템 064350, BASE+VALUATION, 1:2 손익비).
 
 1차 신호(primary_side): return_20d의 부호 (단순 모멘텀 룰, 항상 매수/매도 둘 중 하나 --
     "방향을 맞히는 것"은 이 규칙에 맡기고, 얼마나 잘 맞을지 확신도는 2차 모델이 판단)
@@ -46,8 +46,8 @@ FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_VALUATION
 
 
 def build_meta_labeling_dataset(
-    ticker: str = "084010.KS",
-    ticker_krx: str = "084010",
+    ticker: str = "064350.KS",
+    ticker_krx: str = "064350",
     benchmark: str = "^KS11",
     start: str = "2015-01-01",
     end: str = "2026-07-18",
@@ -97,8 +97,8 @@ def build_meta_labeling_dataset(
 
 
 if __name__ == "__main__":
-    TICKER = "084010.KS"
-    TICKER_KRX = "084010"
+    TICKER = "064350.KS"
+    TICKER_KRX = "064350"
     PT_SL = (2, 1)
     NUM_DAYS = 10  # [조정] 20 -> 10 -- 보유기간을 줄여서 거래 회전율을 높임
                    # (기존 20일 기준으로는 전체 2400행/평균 13일 보유 ~= 180건이 사실상 상한이라

@@ -9,7 +9,7 @@ label_tb_binary -> meta_label로 바뀐 것.
     python src/train_xgboost_meta_labeling.py
 
 전제:
-    feature_engineering_meta_labeling.py로 084010_features_meta_labeling.csv가
+    feature_engineering_meta_labeling.py로 064350_features_meta_labeling.csv가
     먼저 생성돼 있어야 함.
 """
 
@@ -36,7 +36,7 @@ NUM_DAYS = 10  # feature_engineering_meta_labeling.py와 동일하게 맞출 것
 HORIZON = NUM_DAYS  # embargo용
 
 
-def load_dataset(ticker_krx: str = "084010") -> pd.DataFrame:
+def load_dataset(ticker_krx: str = "064350") -> pd.DataFrame:
     path = DATA_DIR / f"{ticker_krx}_features_meta_labeling_nd{NUM_DAYS}.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     return df.sort_index()
@@ -89,7 +89,7 @@ def run_walk_forward(df: pd.DataFrame, embargo: int, train_size: int = 300, test
 
 
 if __name__ == "__main__":
-    df = load_dataset("084010")
+    df = load_dataset("064350")
     print(f"데이터: {df.shape[0]}행 ({df.index.min().date()} ~ {df.index.max().date()})")
     print(f"meta_label 분포: {df['meta_label'].value_counts(normalize=True).to_dict()}\n")
 

@@ -1,5 +1,19 @@
 """
-Triple-barrier 라벨 버전 BASE feature 데이터셋 생성 (현대로템 064350, BASE, h=20 기준).
+Triple-barrier 라벨 버전 BASE feature 데이터셋 생성.
+
+[체결 방식 최종 확정] "D일 종가까지 정보로 신호 -> D+1일 종가 체결"로 확정.
+시가체결/하이브리드(종가라벨+시가체결) 등 여러 대안을 비교해본 결과, 시가체결은
+배리어 라벨 자체가 더 시끄러워져서(진입일 하루치 장중 노이즈가 라벨에 섞임)
+모델 신호 선별력이 떨어짐이 확인됨. 반면 종가체결은 그 노이즈가 원천 배제돼 더
+깨끗한 학습 목표가 되고, 종가 동시호가(MOC) 주문으로 실제 체결도 가능한 정당한
+가정이라 최종 채택.
+
+[추가 수정] 청산(배리어 터치) 판정에 High/Low 반영. 기존엔 종가만으로 판정해서
+장중에 배리어를 건드렸다가 종가에 회복된 경우를 놓쳤음 -- 실제 손절/익절 주문은
+가격이 그 선에 닿는 즉시 체결되므로, High/Low로 장중 터치까지 감지하고 청산가도
+그날 종가가 아니라 실제 배리어 트리거 가격을 쓰도록 labeling_triple_barrier.py의
+apply_triple_barrier()/get_bins()를 확장함. 이 파일로 만든 기존 CSV는 이 개선
+전이므로 재생성 필요.
 
 기존 feature_engineering.py의 add_label()(고정 horizon 이진분류)은 비교 기준선으로
 그대로 남겨두고, labeling_triple_barrier.py의 triple-barrier 방식으로 새 라벨을
@@ -31,9 +45,7 @@ from feature_engineering import (
     add_volume_features, add_relative_strength_features, add_label,
 )
 from feature_engineering_valuation import load_valuation, add_valuation_features
-from labeling_triple_barrier import (
-    get_daily_volatility, get_vertical_barrier, apply_triple_barrier, get_bins,
-)
+from labeling_triple_barrier import build_shifted_barrier_labels
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -68,20 +80,16 @@ def build_triple_barrier_dataset(
     df = add_label(df, horizon=horizon_fixed, cost_threshold=cost_threshold)
     df = df.rename(columns={"label": "label_fixed"})
 
-    # triple-barrier 라벨
+    # triple-barrier 라벨 (체결 지연 1일 + D+1 종가체결로 확정 + High/Low로 장중 터치 반영)
     close = df["Close"]
-    daily_vol = get_daily_volatility(close, span=vol_span)
-    # [수정] 일간 변동성을 그대로 배리어 폭으로 쓰면 num_days(20일) 보유기간 대비
-    # 배리어가 지나치게 타이트해짐 -- 20일 누적 변동성은 대략 sqrt(20)배로 커지므로,
-    # 배리어를 "20일치 예상 변동폭" 기준으로 스케일링해야 실제로 num_days만큼 보유하는
-    # 라벨이 나옴. 이걸 빠뜨렸더니 배리어가 하루이틀 안에 거의 다 터져서(label_tb=0 비율
-    # 0.3%), BASE feature(중기 모멘텀)로는 예측 불가능한 "내일 방향" 라벨이 돼버렸었음
-    # (AUC 0.50, 완전히 랜덤).
-    vol = daily_vol * np.sqrt(num_days)
-    t_events = close.index[vol_span:]  # 변동성 워밍업 구간 제외
-    t1 = get_vertical_barrier(close, t_events, num_days=num_days)
-    events = apply_triple_barrier(close, t_events, pt_sl=pt_sl, target=vol, t1=t1)
-    bins = get_bins(events, close)
+    high = df["High"] if "High" in df.columns else None
+    low = df["Low"] if "Low" in df.columns else None
+    if high is None or low is None:
+        print("경고: 데이터에 High/Low 컬럼이 없어서 종가만으로 배리어 터치 판정함 "
+              "(장중 터치 놓칠 수 있음)")
+    bins = build_shifted_barrier_labels(
+        close, vol_span=vol_span, num_days=num_days, pt_sl=pt_sl, high=high, low=low,
+    )
 
     df["label_tb"] = bins["label"]
     df["ret_tb"] = bins["ret"]
@@ -136,12 +144,13 @@ def build_triple_barrier_dataset_combined(
     df = add_valuation_features(df, valuation_df)
 
     close = df["Close"]
-    daily_vol = get_daily_volatility(close, span=vol_span)
-    vol = daily_vol * np.sqrt(num_days)  # build_triple_barrier_dataset()과 동일한 스케일링
-    t_events = close.index[vol_span:]
-    t1 = get_vertical_barrier(close, t_events, num_days=num_days)
-    events = apply_triple_barrier(close, t_events, pt_sl=pt_sl, target=vol, t1=t1)
-    bins = get_bins(events, close)
+    high = df["High"] if "High" in df.columns else None
+    low = df["Low"] if "Low" in df.columns else None
+    if high is None or low is None:
+        print("경고: 데이터에 High/Low 컬럼이 없어서 종가만으로 배리어 터치 판정함")
+    bins = build_shifted_barrier_labels(
+        close, vol_span=vol_span, num_days=num_days, pt_sl=pt_sl, high=high, low=low,
+    )
 
     df["label_tb"] = bins["label"]
     df["ret_tb"] = bins["ret"]
@@ -164,43 +173,43 @@ def build_triple_barrier_dataset_combined(
 
 
 if __name__ == "__main__":
-    TICKER = "052690.KS"
-    TICKER_KRX = "052690"
-    PT_SL = (2, 1)   # 1:2 손익비 -- 손절 대비 익절을 2배 넓게 (현대로템 검증 때와 동일)
-    NUM_DAYS = 20    # [원복] 10 -> 20 -- 전략 자체는 안 바꾸고 종목만 바꿔서 깨끗하게 재현성 테스트
-    CONFIG_LABEL = f"pt{PT_SL[0]}sl{PT_SL[1]}_nd{NUM_DAYS}"
+    # [재생성] 체결 지연 버그 수정 반영 -- 이미 검증된 3종목 전부 다시 생성
+    VALIDATED_TICKERS = {
+        "064350": "064350.KS",  # 현대로템
+        "052690": "052690.KS",  # 한전기술
+        "118990": "118990.KQ",  # 모트렉스 (코스닥, .KQ 접미사)
+    }
+    PT_SL = (2, 1)
+    NUM_DAYS = 20
+    CONFIG_LABEL = f"pt{PT_SL[0]}sl{PT_SL[1]}_nd{NUM_DAYS}_hl"  # D+1 종가체결(확정) + High/Low 장중터치 반영
 
-    print(f"=== BASE ({TICKER_KRX}, {CONFIG_LABEL}) ===")
-    dataset = build_triple_barrier_dataset(ticker=TICKER, pt_sl=PT_SL, num_days=NUM_DAYS)
-    print(f"생성된 데이터셋 shape: {dataset.shape}")
-    print(f"설정: pt_sl={PT_SL}, num_days={NUM_DAYS} (변동성은 daily_vol * sqrt(num_days) 기준)")
+    for TICKER_KRX, TICKER in VALIDATED_TICKERS.items():
+        print(f"\n{'#' * 60}\n# {TICKER_KRX} ({TICKER})\n{'#' * 60}")
 
-    print(f"\n기존 고정 horizon 라벨(label_fixed) 분포:\n{dataset['label_fixed'].value_counts(normalize=True)}")
-    tb_dist = dataset['label_tb'].value_counts(normalize=True)
-    print(f"\ntriple-barrier 라벨(label_tb) 분포:\n{tb_dist}")
-    if tb_dist.get(0.0, 0) < 0.02:
-        print("경고: label_tb=0(수직 배리어까지 버틴 경우) 비율이 여전히 2% 미만 -- "
-              "배리어가 아직도 너무 타이트할 수 있음. pt_sl을 키워서 재시도 고려.")
+        print(f"=== BASE ({TICKER_KRX}, {CONFIG_LABEL}) ===")
+        dataset = build_triple_barrier_dataset(ticker=TICKER, pt_sl=PT_SL, num_days=NUM_DAYS)
+        print(f"생성된 데이터셋 shape: {dataset.shape}")
 
-    label_tb_binary = (dataset["label_tb"] > 0).astype(int)
-    agreement = (dataset["label_fixed"] == label_tb_binary).mean()
-    print(f"\n두 라벨의 방향 일치율: {agreement:.1%} (참고용 -- 낮다고 나쁜 건 아님, 정의 자체가 다름)")
+        tb_dist = dataset['label_tb'].value_counts(normalize=True)
+        print(f"triple-barrier 라벨(label_tb) 분포:\n{tb_dist}")
+        if tb_dist.get(0.0, 0) < 0.02:
+            print("경고: label_tb=0 비율이 여전히 2% 미만 -- 배리어가 너무 타이트할 수 있음.")
 
-    out_path = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_{CONFIG_LABEL}.csv"
-    dataset.to_csv(out_path)
-    print(f"저장 완료: {out_path}")
+        out_path = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_{CONFIG_LABEL}.csv"
+        dataset.to_csv(out_path)
+        print(f"저장 완료: {out_path}")
 
-    print(f"\n=== COMBINED (BASE + VALUATION), {CONFIG_LABEL} ===")
-    dataset_combined = build_triple_barrier_dataset_combined(
-        ticker=TICKER, ticker_krx=TICKER_KRX, pt_sl=PT_SL, num_days=NUM_DAYS,
-    )
-    print(f"생성된 데이터셋 shape: {dataset_combined.shape} "
-          f"(BASE 대비 {dataset.shape[0] - dataset_combined.shape[0]}행 감소 -- "
-          f"밸류에이션 z-score의 252일 워밍업 구간 때문, 정상)")
+        print(f"\n=== COMBINED (BASE + VALUATION), {CONFIG_LABEL} ===")
+        dataset_combined = build_triple_barrier_dataset_combined(
+            ticker=TICKER, ticker_krx=TICKER_KRX, pt_sl=PT_SL, num_days=NUM_DAYS,
+        )
+        print(f"생성된 데이터셋 shape: {dataset_combined.shape} "
+              f"(BASE 대비 {dataset.shape[0] - dataset_combined.shape[0]}행 감소 -- "
+              f"밸류에이션 z-score 워밍업 구간 때문, 정상)")
 
-    tb_dist_combined = dataset_combined['label_tb'].value_counts(normalize=True)
-    print(f"\ntriple-barrier 라벨(label_tb) 분포 (COMBINED):\n{tb_dist_combined}")
+        out_path_combined = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_{CONFIG_LABEL}_valuation.csv"
+        dataset_combined.to_csv(out_path_combined)
+        print(f"저장 완료: {out_path_combined}")
 
-    out_path_combined = DATA_DIR / f"{TICKER_KRX}_features_triple_barrier_{CONFIG_LABEL}_valuation.csv"
-    dataset_combined.to_csv(out_path_combined)
-    print(f"저장 완료: {out_path_combined}")
+    print("\n\n3종목 전부 재생성 완료 -- backtest_triple_barrier.py로 종목별 재검증,")
+    print("이어서 backtest_triple_barrier_pooled.py로 풀링 재검증할 것.")

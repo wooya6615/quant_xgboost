@@ -1,0 +1,127 @@
+{
+  "generated_at": "2026-08-11T12:52:23.208236",
+  "FINAL_VERDICT": "[배포 부적합] pt_sl 축 PBO=95.6%로 심각한 과적합 위험 확인됨 (compute_pbo_v3.py). 채택값 pt_sl=(2,1)은 IS 1등 빈도 4위/5개(25/252회)에 불과하고, 이미 폐기했던 pt_sl=(1,1)이 97회로 가장 자주 1등. 5-seed/국면검증/체결타이밍수정을 다 통과했어도 이 결과는 배포하지 말 것 -- 참고용으로만 취급. 자세한 내용은 docs/candidate_model_triple_barrier_pooled.md 참고.",
+  "strategy": {
+    "labeling": "triple-barrier (López de Prado)",
+    "pt_sl": [
+      2,
+      1
+    ],
+    "num_days": 20,
+    "vol_scaling": "daily_vol * sqrt(num_days)",
+    "entry_timing": "D일 종가까지 정보로 신호 -> D+1일 종가 체결 (MOC 주문)",
+    "exit_detection": "High/Low 반영 -- 장중 배리어 터치 감지, 청산가는 배리어 트리거 가격",
+    "features": [
+      "return_5d",
+      "return_10d",
+      "return_20d",
+      "rsi_14",
+      "macd_hist",
+      "hist_vol_20d",
+      "bb_width",
+      "bb_position",
+      "atr_14",
+      "volume_ratio_20d",
+      "obv_change_20d",
+      "excess_return_5d",
+      "excess_return_20d",
+      "per",
+      "pbr",
+      "div",
+      "per_zscore_252d",
+      "pbr_zscore_252d"
+    ],
+    "model_params": {
+      "n_estimators": 200,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 1.0,
+      "eval_metric": "logloss",
+      "random_state": 42
+    },
+    "entry_threshold": 0.65,
+    "round_trip_cost_assumed": 0.002
+  },
+  "portfolio": {
+    "tickers": [
+      {
+        "code": "064350",
+        "name": "현대로템",
+        "weight": 0.3333
+      },
+      {
+        "code": "052690",
+        "name": "한전기술",
+        "weight": 0.3333
+      },
+      {
+        "code": "118990",
+        "name": "모트렉스",
+        "weight": 0.3333
+      }
+    ],
+    "rebalancing": "동일가중, 각 종목 독립 모델의 신호에 따라 개별 진입/청산"
+  },
+  "validation_summary": {
+    "note": "docs/candidate_model_triple_barrier_pooled.md 참고 -- 아래는 요약",
+    "pooled_5seed_win_rate_full_period": "5/5 (blended net 512.0~943.9% vs blended Buy&Hold 485.1%, 고정 구간 기준)",
+    "pooled_trade_count_range": "255~259건",
+    "per_ticker_individual_caveat": "개별 종목 단독으로는 완벽하지 않음 (한전기술 전체기간 2/5, 모트렉스 2025이전절단 3/5) -- 반드시 3종목 포트폴리오로만 유효",
+    "pbo_threshold_axis_only": "6.7% (compute_pbo.py, 낮음)",
+    "pbo_threshold_x_portfolio_axis": "81.3% (compute_pbo_v2.py, 28개 후보, 매우 높음) -- 검증 범위를 넓히자 정반대 결론. 채택한 조합(th0.65, 3종목전체)은 구간별 IS 최고 후보 목록에 상위권으로 등장하지 않음"
+  },
+  "critical_warning": "확장 PBO(threshold x 종목조합) 결과가 81.3%로 매우 높게 나옴 -- 이 문제 공간 자체가 노이즈가 크다는 뜻. 이 모델은 '완전히 검증된 결과'가 아니라 '여러 방법론적 결함을 고치고도 살아남았지만 문제 공간의 노이즈가 크다는 게 확인된 잠정적 후보'로 취급할 것. 실거래 투입 전 (1) pt_sl/num_days까지 포함한 완전한 PBO, (2) 소액 paper trading 기간, (3) 정기 재검증 필요.",
+  "known_limitations": [
+    "pt_sl/num_days/체결방식 축까지 포함한 완전한 PBO는 미실시",
+    "7종목 시도 중 3종목만 최종 통과 -- 통하는 종목의 공통 조건 미규명",
+    "실거래 슬리피지(주문 크기 대비 유동성 부족) 미반영",
+    "포지션 사이징/자금관리 규칙 미검증"
+  ],
+  "models": [
+    {
+      "ticker": "064350",
+      "name": "현대로템",
+      "model_path": "models\\064350_triple_barrier_model.joblib",
+      "n_training_rows": 2231,
+      "training_date_range": [
+        "2017-05-02",
+        "2026-06-18"
+      ],
+      "label_distribution": {
+        "0": 0.502,
+        "1": 0.498
+      }
+    },
+    {
+      "ticker": "052690",
+      "name": "한전기술",
+      "model_path": "models\\052690_triple_barrier_model.joblib",
+      "n_training_rows": 2402,
+      "training_date_range": [
+        "2016-08-23",
+        "2026-06-18"
+      ],
+      "label_distribution": {
+        "0": 0.5366,
+        "1": 0.4634
+      }
+    },
+    {
+      "ticker": "118990",
+      "name": "모트렉스",
+      "model_path": "models\\118990_triple_barrier_model.joblib",
+      "n_training_rows": 1913,
+      "training_date_range": [
+        "2018-08-22",
+        "2026-06-18"
+      ],
+      "label_distribution": {
+        "0": 0.5348,
+        "1": 0.4652
+      }
+    }
+  ]
+}

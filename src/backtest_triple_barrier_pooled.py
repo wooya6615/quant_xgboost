@@ -34,10 +34,11 @@ FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_VALUATION
 
 ROUND_TRIP_COST = 0.002
 NUM_DAYS = 20              # 안 바꿈 -- 현대로템/한전기술 개별 검증 때와 동일 전략 유지
-CONFIG_LABEL = "pt2sl1_nd20"
-TICKERS = ["064350", "052690"]
+CONFIG_LABEL = "pt2sl1_nd20_hl"  # D+1종가체결+High/Low 최종확정
+TICKERS = ["064350", "052690", "118990"]  # 현대로템 + 한전기술 + 모트렉스 (3종목 다 개별 5-seed 통과)
 THRESHOLD = 0.65           # 두 종목 개별 검증에서 공통으로 썼던 threshold
 SEEDS = [42, 1, 7, 123, 2024]
+WEIGHT = 1 / len(TICKERS)  # 동일가중 -- TICKERS 목록에 종목 추가/제거해도 자동으로 맞춰짐
 
 
 def load_dataset(ticker_krx: str) -> pd.DataFrame:
@@ -108,15 +109,28 @@ def generate_trades(df: pd.DataFrame, threshold: float = THRESHOLD, train_size: 
     return pd.DataFrame(trades)
 
 
+def get_fixed_bh_window(df: pd.DataFrame, train_size: int = 300, test_size: int = 60,
+                         step: int = 60, embargo: int = NUM_DAYS) -> tuple:
+    """
+    Buy&Hold 비교 기준을 "이번 거래들의 기간"이 아니라 walk-forward 전체 테스트
+    구간(첫 fold 시작~마지막 fold 끝)으로 고정 -- 시드/threshold마다 값이 흔들리는
+    문제를 방지 (종목별로 데이터 길이가 다르므로 종목마다 따로 계산해야 함).
+    """
+    splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
+    first_test_idx = splits[0][1][0]
+    last_test_idx = splits[-1][1][-1]
+    return df.index[first_test_idx], df.index[min(last_test_idx, len(df) - 1)]
+
+
 def run_single_ticker(ticker: str, random_state: int = 42) -> dict:
     df = load_dataset(ticker)
     trades = generate_trades(df, random_state=random_state)
+    bh_window = get_fixed_bh_window(df)
     if trades.empty:
         return {"ticker": ticker, "n_trades": 0, "net": 0.0, "bh": None, "trades": trades}
 
     net = (1 + trades["net_return"]).prod() - 1
-    test_start, test_end = trades["entry_date"].min(), trades["exit_date"].max()
-    bh = df.loc[test_end, "Close"] / df.loc[test_start, "Close"] - 1
+    bh = df.loc[bh_window[1], "Close"] / df.loc[bh_window[0], "Close"] - 1
     return {"ticker": ticker, "n_trades": len(trades), "net": net, "bh": bh, "trades": trades}
 
 
@@ -132,12 +146,12 @@ if __name__ == "__main__":
     total_n_trades = len(all_trades)
     win_rate = (all_trades["net_return"] > 0).mean()
 
-    blended_net = sum(0.5 * per_ticker[t]["net"] for t in TICKERS)
-    blended_bh = sum(0.5 * per_ticker[t]["bh"] for t in TICKERS)
+    blended_net = sum(WEIGHT * per_ticker[t]["net"] for t in TICKERS)
+    blended_bh = sum(WEIGHT * per_ticker[t]["bh"] for t in TICKERS)
 
     print(f"\n=== 풀링 결과 (동일가중 블렌딩, seed=42) ===")
-    print(f"총 거래 수: {total_n_trades} (현대로템 {per_ticker['064350']['n_trades']} + "
-          f"한전기술 {per_ticker['052690']['n_trades']})")
+    ticker_counts = ", ".join(f"{t}={per_ticker[t]['n_trades']}" for t in TICKERS)
+    print(f"총 거래 수: {total_n_trades} ({ticker_counts})")
     print(f"전체 거래 기준 승률: {win_rate:.1%}")
     print(f"블렌딩 포트폴리오 net: {blended_net:.1%}")
     print(f"블렌딩 Buy & Hold: {blended_bh:.1%}")
@@ -154,8 +168,8 @@ if __name__ == "__main__":
     for seed in SEEDS:
         seed_data = {t: run_single_ticker(t, random_state=seed) for t in TICKERS}
         n_trades_total = sum(seed_data[t]["n_trades"] for t in TICKERS)
-        blended_net_seed = sum(0.5 * seed_data[t]["net"] for t in TICKERS)
-        blended_bh_seed = sum(0.5 * seed_data[t]["bh"] for t in TICKERS)
+        blended_net_seed = sum(WEIGHT * seed_data[t]["net"] for t in TICKERS)
+        blended_bh_seed = sum(WEIGHT * seed_data[t]["bh"] for t in TICKERS)
         seed_results.append({
             "seed": seed, "n_trades": n_trades_total,
             "blended_net": blended_net_seed, "blended_bh": blended_bh_seed,

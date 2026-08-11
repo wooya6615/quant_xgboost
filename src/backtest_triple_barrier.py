@@ -12,7 +12,7 @@ label_tb_binary가 5/5 시드 AUC 개선을 보였다고 여기서 끝내지 않
     python src/backtest_triple_barrier.py
 
 전제:
-    feature_engineering_triple_barrier.py로 052690_features_triple_barrier_pt2sl1_nd20.csv가
+    feature_engineering_triple_barrier.py로 118990_features_triple_barrier_pt2sl1_nd20.csv가
     먼저 생성돼 있어야 함 (CONFIG_LABEL 상수 참고).
 """
 
@@ -33,8 +33,8 @@ FEATURE_COLS_BASE = [
 
 FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d"]
 
-TICKER_KRX = "052690"     # 종목 바꿀 땐 이것만 수정 (한전기술 -- 종목만 바꾼 깨끗한 재현성 테스트)
-CONFIG_LABEL = "pt2sl1_nd20"  # feature_engineering_triple_barrier.py와 동일하게 맞출 것 (num_days 원복)
+TICKER_KRX = "118990"     # 종목 바꿀 땐 이것만 수정 (한전기술 -- 시가체결 재검증 3번째)
+CONFIG_LABEL = "pt2sl1_nd20_hl"  # feature_engineering_triple_barrier.py와 동일하게 맞출 것 (D+1종가체결+High/Low 최종확정)
 NUM_DAYS = 20              # CONFIG_LABEL의 nd 숫자와 동일하게 맞출 것 (embargo에 사용)
 
 ROUND_TRIP_COST = 0.002  # 왕복 거래비용 0.2% -- 기존 실험들과 동일 가정
@@ -113,7 +113,22 @@ def generate_trades(df: pd.DataFrame, feature_cols: list = None, threshold: floa
     return pd.DataFrame(trades)
 
 
-def summarize(trades: pd.DataFrame, df: pd.DataFrame, show_top_year_exclusion: bool = False) -> dict:
+def get_fixed_bh_window(df: pd.DataFrame, train_size: int = 300, test_size: int = 60,
+                         step: int = 60, embargo: int = HORIZON_FOR_EMBARGO) -> tuple:
+    """
+    Buy&Hold 비교 기준을 "이번에 나온 거래들의 기간"이 아니라 walk-forward 전체
+    테스트 구간(첫 fold 시작 ~ 마지막 fold 끝)으로 고정. 어떤 시드/threshold가
+    어떤 날짜를 신호로 골랐는지와 무관하게 항상 동일한 기간과 비교해야 공정함
+    (다르면 시드마다 Buy&Hold 값 자체가 흔들려서 비교가 왜곡됨).
+    """
+    splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
+    first_test_idx = splits[0][1][0]
+    last_test_idx = splits[-1][1][-1]
+    return df.index[first_test_idx], df.index[min(last_test_idx, len(df) - 1)]
+
+
+def summarize(trades: pd.DataFrame, df: pd.DataFrame, show_top_year_exclusion: bool = False,
+              bh_window: tuple | None = None) -> dict:
     if trades.empty:
         print("거래가 하나도 생성되지 않았어 -- threshold를 낮추거나 데이터 기간을 늘려볼 것.")
         return {"n_trades": 0, "total_net": None}
@@ -122,8 +137,11 @@ def summarize(trades: pd.DataFrame, df: pd.DataFrame, show_top_year_exclusion: b
     total_gross = (1 + trades["gross_return"]).prod() - 1
     win_rate = (trades["net_return"] > 0).mean()
 
-    test_start = trades["entry_date"].min()
-    test_end = trades["exit_date"].max()
+    if bh_window is not None:
+        test_start, test_end = bh_window
+    else:
+        test_start = trades["entry_date"].min()
+        test_end = trades["exit_date"].max()
     bh_return = df.loc[test_end, "Close"] / df.loc[test_start, "Close"] - 1
 
     print(f"거래 수: {len(trades)}, 평균 보유일수: {trades['holding_days'].mean():.1f}일")
@@ -161,12 +179,13 @@ def summarize(trades: pd.DataFrame, df: pd.DataFrame, show_top_year_exclusion: b
     }
 
 
-def run_threshold_sweep(df: pd.DataFrame, feature_cols: list, thresholds: list) -> pd.DataFrame:
+def run_threshold_sweep(df: pd.DataFrame, feature_cols: list, thresholds: list,
+                         bh_window: tuple | None = None) -> pd.DataFrame:
     rows = []
     for threshold in thresholds:
         print(f"\n--- threshold={threshold} ---")
         trades = generate_trades(df, feature_cols=feature_cols, threshold=threshold)
-        result = summarize(trades, df)
+        result = summarize(trades, df, bh_window=bh_window)
         result["threshold"] = threshold
         rows.append(result)
     return pd.DataFrame(rows)
@@ -176,16 +195,20 @@ if __name__ == "__main__":
     print(f"=== BASE ({TICKER_KRX}, {CONFIG_LABEL}) ===")
     df = load_dataset(TICKER_KRX, combined=False)
     print(f"데이터: {df.shape[0]}행 ({df.index.min().date()} ~ {df.index.max().date()})\n")
+    bh_window_base = get_fixed_bh_window(df)
     trades = generate_trades(df, feature_cols=FEATURE_COLS_BASE)
-    summarize(trades, df)
+    summarize(trades, df, bh_window=bh_window_base)
 
     print("\n\n=== COMBINED (BASE + VALUATION) -- threshold 스윕 ===")
     df_combined = load_dataset(TICKER_KRX, combined=True)
     print(f"데이터: {df_combined.shape[0]}행 "
           f"({df_combined.index.min().date()} ~ {df_combined.index.max().date()})")
+    bh_window_combined = get_fixed_bh_window(df_combined)
+    print(f"고정 Buy&Hold 비교 구간(COMBINED): {bh_window_combined[0].date()} ~ {bh_window_combined[1].date()}")
 
     THRESHOLDS = [0.55, 0.60, 0.65, 0.70]
-    sweep = run_threshold_sweep(df_combined, FEATURE_COLS_BASE + FEATURE_COLS_VALUATION, THRESHOLDS)
+    sweep = run_threshold_sweep(df_combined, FEATURE_COLS_BASE + FEATURE_COLS_VALUATION, THRESHOLDS,
+                                 bh_window=bh_window_combined)
 
     print("\n\n=== threshold 스윕 요약 (COMBINED) ===")
     print(sweep[["threshold", "n_trades", "win_rate", "total_net", "total_gross", "bh_return"]]
@@ -209,7 +232,8 @@ if __name__ == "__main__":
             df_combined, feature_cols=FEATURE_COLS_BASE + FEATURE_COLS_VALUATION,
             threshold=0.65, random_state=seed,
         )
-        r = summarize(trades_seed, df_combined, show_top_year_exclusion=(seed == 42))
+        r = summarize(trades_seed, df_combined, show_top_year_exclusion=(seed == 42),
+                      bh_window=bh_window_combined)
         r["seed"] = seed
         seed_results.append(r)
 
@@ -237,6 +261,9 @@ if __name__ == "__main__":
     print("=" * 60)
     df_before_2025 = df_combined[df_combined.index < "2025-01-01"]
     print(f"2025년 이전 데이터: {df_before_2025.shape[0]}행 (원래 {df_combined.shape[0]}행)")
+    bh_window_before_2025 = get_fixed_bh_window(df_before_2025)
+    print(f"고정 Buy&Hold 비교 구간(2025년 이전): {bh_window_before_2025[0].date()} ~ "
+          f"{bh_window_before_2025[1].date()}")
 
     excl_results = []
     for seed in SEEDS:
@@ -245,7 +272,7 @@ if __name__ == "__main__":
             df_before_2025, feature_cols=FEATURE_COLS_BASE + FEATURE_COLS_VALUATION,
             threshold=0.65, random_state=seed,
         )
-        r = summarize(trades_excl, df_before_2025)
+        r = summarize(trades_excl, df_before_2025, bh_window=bh_window_before_2025)
         r["seed"] = seed
         excl_results.append(r)
 

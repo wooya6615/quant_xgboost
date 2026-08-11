@@ -1,3 +1,17 @@
+# quant_xgboost
+> **최종 결론 (2026-08, triple-barrier 라인)**: `docs/candidate_model_triple_barrier_pooled.md`
+> 참고. Triple-barrier 라벨링 + BASE/VALUATION COMBINED + 현대로템/한전기술/모트렉스
+> 3종목 풀링 전략을 5-seed/국면검증/체결타이밍버그수정/청산판정개선까지 전부 통과시켰으나,
+> **PBO(Probability of Backtest Overfitting) 검증에서 pt_sl 축 95.6%로 심각한 과적합
+> 위험이 확인되어 최종적으로 [배포 부적합] 판정.** 채택했던 pt_sl=(2,1)은 구간별
+> in-sample 최고 빈도 순위 4/5위에 불과했고, 이미 폐기했던 pt_sl=(1,1)이 가장 자주
+> 1등이었음 -- "5-seed를 통과했다"는 것만으로는 하이퍼파라미터 탐색 과정 자체의
+> 과적합을 못 잡아낸다는 걸 확인한 사례.
+>
+> 방법론적 수정(체결 지연 1일, High/Low 기반 청산 판정, 고정 Buy&Hold 비교 구간,
+> CSCV/PBO 계산 인프라)은 그 자체로 유효하며 다음 실험에 재사용 가능. 실거래
+> 배포는 pt_sl을 사전 고정한 재검증 전까지 보류.
+
 # AI 퀀트 트레이딩 - 방향성 예측 파이프라인
 
 XGBoost를 활용해 개별 종목의 단기(N일 후) 방향성을 예측하는 실험 프로젝트입니다.

@@ -1,10 +1,13 @@
 """
-Meta-labeling 데이터셋 생성 (현대로템 064350, BASE+VALUATION, 1:2 손익비).
+Meta-labeling 데이터셋 생성 (BASE+VALUATION, 1:2 손익비).
+
+[중요, 재생성 필요] 체결 타이밍 버그 수정됨 -- feature_engineering_triple_barrier.py와
+동일한 문제. labeling_triple_barrier.py의 build_shifted_barrier_labels()로 교체해서
+"D일 신호(primary_side 포함) -> D+1일 종가 체결"로 수정함. 기존 CSV는 재생성 필요.
 
 1차 신호(primary_side): return_20d의 부호 (단순 모멘텀 룰, 항상 매수/매도 둘 중 하나 --
     "방향을 맞히는 것"은 이 규칙에 맡기고, 얼마나 잘 맞을지 확신도는 2차 모델이 판단)
-2차 라벨(meta_label): labeling_triple_barrier.get_meta_labels()로 "그 방향 베팅이
-    익절을 손절보다 먼저 쳤는가"를 0/1로 라벨링
+2차 라벨(meta_label): 익절을 손절보다 먼저 쳤는가를 0/1로 라벨링
 
 이전 실험(backtest_triple_barrier.py)에서 확인된 핵심 문제 -- "gross는 플러스인데
 거래비용이 다 갉아먹는다" -- 를 메타 모델의 확신도 threshold로 거래 빈도를 줄여서
@@ -31,7 +34,7 @@ from feature_engineering import (
     add_volume_features, add_relative_strength_features,
 )
 from feature_engineering_valuation import load_valuation, add_valuation_features
-from labeling_triple_barrier import get_daily_volatility, get_meta_labels
+from labeling_triple_barrier import build_shifted_barrier_labels
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -71,12 +74,23 @@ def build_meta_labeling_dataset(
     primary_side = np.sign(df["return_20d"]).reindex(close.index)
     primary_side = primary_side[primary_side != 0]  # return_20d==0인 극히 드문 날은 베팅 자체가 없음
 
-    daily_vol = get_daily_volatility(close, span=vol_span)
-    vol = daily_vol * np.sqrt(num_days)  # triple-barrier 실험과 동일한 스케일링
-
-    meta_bins = get_meta_labels(
-        primary_side, close, pt_sl=pt_sl, target=vol, num_days=num_days,
+    # 체결 지연 1일 반영 -- D일 신호(primary_side, meta_label 대상 결정)로 D+1일 체결
+    if "Open" in df.columns:
+        open_price = df["Open"]
+    else:
+        open_price = None
+        print("경고: 데이터에 Open 컬럼이 없어서 종가 체결로 폴백함")
+    meta_bins = build_shifted_barrier_labels(
+        close, vol_span=vol_span, num_days=num_days, pt_sl=pt_sl, side=primary_side,
+        open_price=open_price,
     )
+
+    # build_shifted_barrier_labels는 범용 get_bins() 결과(touch_time/side/ret/label)만
+    # 반환하므로, meta-labeling에 필요한 파생 컬럼을 여기서 추가 (기존 get_meta_labels()가
+    # 하던 역할)
+    meta_bins["meta_label"] = (meta_bins["label"] > 0).astype(int)
+    # side 컬럼이 이미 primary_side 값 그대로임 (build_shifted_barrier_labels에 side=primary_side로 넘겼으므로)
+    meta_bins["primary_side"] = meta_bins["side"]
 
     df["primary_side"] = meta_bins["primary_side"]
     df["meta_label"] = meta_bins["meta_label"]

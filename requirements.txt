@@ -1,0 +1,23 @@
+# quant_xgboost 의존성 목록
+# 설치: pip install -r requirements.txt
+#
+# 버전을 명시하지 않은 이유: 지금까지 버전 핀 없이 개발해왔고, 핀을 걸려면
+# 현재 venv에서 실제 동작 확인된 버전을 pip freeze로 뽑아야 함 (아래 참고).
+# 일단 이름만 채워서 "뭘 설치해야 하는지"부터 명확히 하는 게 우선.
+
+# 데이터 수집
+yfinance          # 가격/거래량 (Close, Volume, High, Low)
+pykrx             # 수급, 밸류에이션, 공매도, 외국인보유율, KOSPI200 구성종목 (KRX 로그인 필요, .env)
+opendartreader    # DART 공시 데이터
+
+# 데이터 처리
+pandas
+numpy
+
+# 모델
+xgboost
+scikit-learn
+joblib            # 최종 모델 저장/로드 (train_final_model.py, generate_daily_signal.py)
+
+# 환경변수
+python-dotenv     # .env에서 KRX_ID/KRX_PW, DART API 키 로드

@@ -29,7 +29,7 @@ FEATURE_COLS_BASE = [
     "volume_ratio_20d", "obv_change_20d",
     "excess_return_5d", "excess_return_20d",
 ]
-FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d"]
+FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d", "is_loss"]
 FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_VALUATION
 
 ROUND_TRIP_COST = 0.002

@@ -56,7 +56,7 @@ FEATURE_COLS_BASE = [
     "excess_return_5d", "excess_return_20d",
 ]
 
-FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d"]
+FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d", "is_loss"]
 
 
 def build_triple_barrier_dataset(
@@ -166,9 +166,10 @@ def build_triple_barrier_dataset_combined(
     ]
 
     result = df[feature_cols].replace([np.inf, -np.inf], np.nan)
-    result = result.dropna(
-        subset=FEATURE_COLS_BASE + FEATURE_COLS_VALUATION + ["label_fixed", "label_tb"]
-    )
+    # ⚠️ 밸류에이션 컬럼(FEATURE_COLS_VALUATION)은 dropna 대상에서 뺌 --
+    # NaN을 XGBoost 네이티브 결측치 처리로 넘기기 위함. BASE feature와 라벨만
+    # 필수로 유지.
+    result = result.dropna(subset=FEATURE_COLS_BASE + ["label_fixed", "label_tb"])
     return result
 
 

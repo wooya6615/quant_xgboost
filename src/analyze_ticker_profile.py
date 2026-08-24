@@ -5,18 +5,20 @@
 사용법:
     python src/analyze_ticker_profile.py
 """
+
+from dotenv import load_dotenv
+
+load_dotenv()
 from pathlib import Path
 import pandas as pd
 import numpy as np
 from pykrx import stock
-from dotenv import load_dotenv
-
-load_dotenv()
 
 TICKERS = {
     "064350": "현대로템",
     "052690": "한전기술",
     "118990": "모트렉스",
+    "010170": "대한광통신",
 }
 START, END = "20150101", "20260718"
 

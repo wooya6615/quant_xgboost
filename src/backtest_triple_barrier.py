@@ -33,7 +33,7 @@ FEATURE_COLS_BASE = [
 
 FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d"]
 
-TICKER_KRX = "118990"     # 종목 바꿀 땐 이것만 수정 (한전기술 -- 시가체결 재검증 3번째)
+TICKER_KRX = "010170"     # 종목 바꿀 땐 이것만 수정 (한전기술 -- 시가체결 재검증 3번째)
 CONFIG_LABEL = "pt2sl1_nd20_hl"  # feature_engineering_triple_barrier.py와 동일하게 맞출 것 (D+1종가체결+High/Low 최종확정)
 NUM_DAYS = 20              # CONFIG_LABEL의 nd 숫자와 동일하게 맞출 것 (embargo에 사용)
 

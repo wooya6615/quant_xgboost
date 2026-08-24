@@ -3,13 +3,13 @@
 '꾸준한 우상향'이면 모델이 못 잡을 이유가 없는데, '급등 소수일 집중형'이면
 triple-barrier(모멘텀 기반 진입, num_days=20)가 구조적으로 놓치기 쉬움.
 """
-from pykrx import stock
 from dotenv import load_dotenv
 import numpy as np
 
 load_dotenv()
+from pykrx import stock
 
-ohlcv = stock.get_market_ohlcv_by_date("20150101", "20260718", "064350")
+ohlcv = stock.get_market_ohlcv_by_date("20150101", "20260718", "010170")
 daily_ret = ohlcv["종가"].pct_change().dropna()
 
 total_log_return = np.log1p(daily_ret).sum()

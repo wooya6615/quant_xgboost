@@ -1,16 +1,19 @@
 """
-새로 스크리닝한 10종목(상위20일 수익률 집중도 중앙값 이하)이 기존 triple-barrier
-BASE+VALUATION 전략(pt_sl=2:1, num_days=20, threshold=0.65)을 개별 5-seed로
-통과하는지 검증. run_universe_triple_barrier.py(조선/방산 4종목 검증 때 썼던
-스크립트)와 동일한 구조 재사용.
+새 종목 후보군이 기존 triple-barrier BASE+VALUATION 전략(pt_sl=2:1, num_days=20,
+threshold=0.65)을 개별 5-seed로 통과하는지 검증.
 
-⚠️ 종목/전략 설정 둘 다 사전등록값 그대로: screen_universe.py에서 나온 순서를
-그대로 쓰고(백테스트 성과로 재정렬 안 함), pt_sl/threshold/num_days도 기존
-검증값(064350/052690/118990) 그대로 유지.
+⚠️ [버그 수정] Buy&Hold 비교 구간을 이제 walk-forward split 자체(첫 fold test
+시작일 ~ 마지막 fold test 종료일)에서 고정으로 계산함 -- seed 루프 밖에서 한 번만
+계산해서 모든 seed가 동일 구간과 비교되도록 함. 기존엔 그 seed가 실제로 만든
+거래들의 날짜 범위(entry_date.min()~exit_date.max())를 썼는데, 이러면 seed마다
+어떤 날 거래가 발생했는지가 XGBoost의 subsample/colsample_bytree 무작위성으로
+흔들리면서 Buy&Hold 비교 대상 자체가 seed마다 달라지는 불공정한 비교가 됐음.
+backtest_triple_barrier.py에서 예전에 한 번 고쳤던 것과 동일한 버그가
+run_universe_triple_barrier.py 계열 스크립트에는 반영이 안 돼 있었음.
 
-⚠️ 009155(삼성전기우, 우선주)는 자산 성격이 달라 스크리닝 결과에서 제외.
-082740(한화엔진, 조선업 밸류체인)은 포함 여부 미정 -- 기본 포함, 필요시
-CANDIDATES에서 지우고 다음 순번으로 교체할 것.
+⚠️ 종목/전략 설정 둘 다 사전등록값 그대로: 후보 종목 순서는 screen_universe.py나
+random_baseline_sample.csv에서 나온 순서 그대로 쓰고(백테스트 성과로 재정렬 안 함),
+pt_sl/threshold/num_days도 기존 검증값(064350/052690/118990) 그대로 유지.
 
 사용법 (레포 루트에서):
     python src/run_screened_universe_triple_barrier.py
@@ -49,16 +52,21 @@ SEEDS = [42, 1, 7, 123, 2024]
 
 # ticker_krx: (종목명, yfinance suffix)
 CANDIDATES = {
-    "064760": ("티씨케이", ".KQ"),
-    "035900": ("JYP Ent.", ".KQ"),
-    "000990": ("DB하이텍", ".KS"),
-    "082740": ("한화엔진", ".KS"),   # ⚠️ 조선업 밸류체인 -- 포함 여부 미정
-    "058470": ("리노공업", ".KQ"),
-    "083450": ("GST", ".KQ"),
-    "131290": ("티에스이", ".KQ"),
-    "089030": ("테크윙", ".KQ"),
-    "005290": ("동진쎄미켐", ".KQ"),
-    "014680": ("한솔케미칼", ".KS"),
+    "010170": ("대한광통신", ".KQ"),
+    "080220": ("제주반도체", ".KQ"),
+    "078600": ("대주전자재료", ".KQ"),
+    "119850": ("지엔씨에너지", ".KQ"),
+    "095610": ("테스", ".KQ"),
+    "086450": ("동국제약", ".KQ"),
+    "000250": ("삼천당제약", ".KQ"),
+    "006340": ("대원전선", ".KS"),
+    "004170": ("신세계", ".KS"),
+    "082920": ("비츠로셀", ".KQ"),
+    "032820": ("우리기술", ".KQ"),
+    "064290": ("인텍플러스", ".KQ"),
+    "009420": ("한올바이오파마", ".KS"),
+    "141080": ("리가켐바이오", ".KQ"),
+    "058610": ("에스피지", ".KQ"),
 }
 
 
@@ -121,6 +129,19 @@ def generate_trades(df: pd.DataFrame, threshold: float = THRESHOLD, train_size: 
     return pd.DataFrame(trades)
 
 
+def get_fixed_bh_window(df: pd.DataFrame, train_size: int = 300, test_size: int = 60,
+                         step: int = 60, embargo: int = NUM_DAYS):
+    """
+    walk-forward split 자체(첫 fold test 시작일 ~ 마지막 fold test 종료일)에서
+    Buy&Hold 비교 구간을 고정으로 계산. 어떤 seed가 어떤 날짜를 신호로 골랐는지와
+    무관하게 항상 동일한 기간과 비교해야 공정함.
+    """
+    splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
+    first_test_idx = splits[0][1][0]
+    last_test_idx = splits[-1][1][-1]
+    return df.index[first_test_idx], df.index[min(last_test_idx, len(df) - 1)]
+
+
 def get_or_build_dataset(ticker_krx: str, name: str, suffix: str) -> pd.DataFrame:
     path = DATA_DIR / f"{ticker_krx}_features_triple_barrier_{CONFIG_LABEL}_valuation.csv"
     if not path.exists():
@@ -141,6 +162,7 @@ def get_or_build_dataset(ticker_krx: str, name: str, suffix: str) -> pd.DataFram
 
 def run_ticker(ticker_krx: str, name: str, suffix: str) -> dict:
     df = get_or_build_dataset(ticker_krx, name, suffix)
+    bh_window = get_fixed_bh_window(df)  # 모든 seed가 동일한 구간과 비교되도록 seed 루프 밖에서 한 번만 계산
 
     seed_nets, seed_bhs, n_trades_list = [], [], []
     for seed in SEEDS:
@@ -151,8 +173,7 @@ def run_ticker(ticker_krx: str, name: str, suffix: str) -> dict:
             n_trades_list.append(0)
             continue
         net = (1 + trades["net_return"]).prod() - 1
-        test_start, test_end = trades["entry_date"].min(), trades["exit_date"].max()
-        bh = df.loc[test_end, "Close"] / df.loc[test_start, "Close"] - 1
+        bh = df.loc[bh_window[1], "Close"] / df.loc[bh_window[0], "Close"] - 1
         seed_nets.append(net)
         seed_bhs.append(bh)
         n_trades_list.append(len(trades))
@@ -183,7 +204,7 @@ if __name__ == "__main__":
         print(f"  -> {name} 종합: {r['win_count']}/5")
 
     print("\n\n" + "=" * 60)
-    print("=== 10종목 종합 요약 ===")
+    print("=== 15종목 종합 요약 ===")
     print("=" * 60)
     summary_df = pd.DataFrame([
         {"종목": r["name"], "코드": r["ticker"], "판정": f"{r['win_count']}/5"}
@@ -193,4 +214,5 @@ if __name__ == "__main__":
 
     passed = [r["ticker"] for r in results if r["win_count"] >= 4]
     print(f"\n4/5 이상 통과 종목: {passed if passed else '없음'}")
-    print("통과한 종목만 섹터PER ablation/풀링 재검증으로 넘어갈 것.")
+    print(f"통과율: {len(passed)}/{len(CANDIDATES)} ({len(passed)/len(CANDIDATES):.0%})")
+    print("이걸 기존 3종목 기록(3/13, 23%)과 비교해서 기저율 판단할 것.")

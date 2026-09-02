@@ -31,10 +31,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 TICKERS = ["064350", "052690", "118990"]
 SEEDS = [42, 1, 7, 123, 2024]
-THRESHOLDS = [0.55, 0.60, 0.65]  # 임계값 자체를 하나로 고정하지 않고 스윕 --
-                                  # 나중에 pt_sl처럼 "탐색해서 고른" 축이 되지 않도록
-                                  # 스윕 결과를 그대로 다 보고하고, 하나를 최종 채택하면
-                                  # 반드시 PBO로 재검증할 것 (지난번 pt_sl 교훈 그대로 적용)
+THRESHOLDS = [0.50, 0.55, 0.60, 0.65]
 TRAIN_SIZE, TEST_SIZE, STEP, EMBARGO = 300, 60, 60, 20
 ROUND_TRIP_COST = 0.002
 EXCLUDE_YEAR = 2025

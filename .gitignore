@@ -26,3 +26,6 @@ final_model_*_metadata.json
 test.py
 
 Kiwoom-REST-API/
+
+*.joblib
+*.json

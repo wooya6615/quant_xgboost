@@ -1,18 +1,17 @@
 """
-현대로템(064350) + 한전기술(052690) 풀링 백테스트.
+현대로템 + 한전기술 + 모트렉스 풀링 백테스트, BASE+VALUATION+MARKET_VAL COMBINED.
+(backtest_triple_barrier_pooled.py를 MARKET_VAL 포함 버전으로 리네이밍 -- 나머지 로직 100% 동일)
 
-지난번 시도(num_days 20->10)는 배리어 폭까지 같이 바뀌어서 "전략 자체가 달라진"
-비교였다는 지적을 반영 -- 이번엔 각 종목의 모델/feature/라벨 정의(num_days=20,
-pt_sl=2:1, COMBINED)를 완전히 그대로 유지한 채, 두 종목의 백테스트 결과를 사후에
-동일가중으로 블렌딩만 함. 실제로 자본을 두 종목에 반반씩 배분한 포트폴리오라고
-생각하면 됨 -- "전략은 안 바꾸고 관측치(거래 수)만 늘리는" 올바른 방법.
+⚠️ pt_sl=(2,1), num_days=20, threshold=0.65, TICKERS(3종목 전체) 전부 사전고정값 그대로
+유지. 시장 PER 피처만 추가해서, 이게 pt_sl 재검증 실패(3/5)를 살리는 데 도움이 되는지
+확인하는 목적 -- 종목 조합이나 threshold는 절대 건드리지 않음.
 
 사용법 (레포 루트에서):
-    python src/backtest_triple_barrier_pooled.py
+    python src/backtest_triple_barrier_market_pooled.py
 
 전제:
-    064350, 052690 둘 다 feature_engineering_triple_barrier.py로
-    {ticker}_features_triple_barrier_pt2sl1_nd20_valuation.csv가 생성돼 있어야 함.
+    3종목 다 feature_engineering_triple_barrier_market.py로
+    {ticker}_features_triple_barrier_pt2sl1_nd20_hl_valuation_market.csv가 생성돼 있어야 함.
 """
 
 from pathlib import Path
@@ -29,20 +28,24 @@ FEATURE_COLS_BASE = [
     "volume_ratio_20d", "obv_change_20d",
     "excess_return_5d", "excess_return_20d",
 ]
-FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d", "is_loss"]
-FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_VALUATION
+FEATURE_COLS_VALUATION = ["per", "pbr", "div", "per_zscore_252d", "pbr_zscore_252d"]
+FEATURE_COLS_MARKET_VAL = [
+    "market_per", "market_pbr",
+    "market_per_zscore_252d", "market_pbr_zscore_252d",
+]
+FEATURE_COLS_COMBINED = FEATURE_COLS_BASE + FEATURE_COLS_VALUATION + FEATURE_COLS_MARKET_VAL
 
 ROUND_TRIP_COST = 0.002
-NUM_DAYS = 20              # 안 바꿈 -- 현대로템/한전기술 개별 검증 때와 동일 전략 유지
-CONFIG_LABEL = "pt2sl1_nd20_hl"  # D+1종가체결+High/Low 최종확정
-TICKERS = ["064350", "052690", "118990"]  # 현대로템 + 한전기술 + 모트렉스 (3종목 다 개별 5-seed 통과)
-THRESHOLD = 0.65           # 두 종목 개별 검증에서 공통으로 썼던 threshold
+NUM_DAYS = 20               # 사전등록값 -- 절대 안 바꿈
+CONFIG_LABEL = "pt2sl1_nd20_hl"
+TICKERS = ["064350", "052690", "118990"]  # 3종목 전체 -- 사전등록값, 절대 안 바꿈
+THRESHOLD = 0.65            # 사전등록값 -- 절대 안 바꿈
 SEEDS = [42, 1, 7, 123, 2024]
-WEIGHT = 1 / len(TICKERS)  # 동일가중 -- TICKERS 목록에 종목 추가/제거해도 자동으로 맞춰짐
+WEIGHT = 1 / len(TICKERS)
 
 
 def load_dataset(ticker_krx: str) -> pd.DataFrame:
-    path = DATA_DIR / f"{ticker_krx}_features_triple_barrier_{CONFIG_LABEL}_valuation.csv"
+    path = DATA_DIR / f"{ticker_krx}_features_triple_barrier_{CONFIG_LABEL}_valuation_market.csv"
     df = pd.read_csv(path, index_col=0, parse_dates=True).sort_index()
     df["label_tb_binary"] = (df["label_tb"] > 0).astype(int)
     df["holding_rows_tb"] = df["holding_rows_tb"].clip(lower=1).astype(int)
@@ -64,7 +67,7 @@ def walk_forward_splits(n_rows: int, train_size: int, test_size: int, step: int,
 def generate_trades(df: pd.DataFrame, threshold: float = THRESHOLD, train_size: int = 300,
                      test_size: int = 60, step: int = 60, embargo: int = NUM_DAYS,
                      random_state: int = 42) -> pd.DataFrame:
-    """현대로템/한전기술 개별 검증 때(backtest_triple_barrier.py)와 완전히 동일한 로직."""
+    """기존 backtest_triple_barrier.py와 완전히 동일한 로직."""
     X = df[FEATURE_COLS_COMBINED]
     y = df["label_tb_binary"]
     splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
@@ -72,6 +75,8 @@ def generate_trades(df: pd.DataFrame, threshold: float = THRESHOLD, train_size: 
     trades = []
     for train_idx, test_idx in splits:
         X_train, y_train = X.iloc[list(train_idx)], y.iloc[list(train_idx)]
+        if y_train.nunique() < 2:
+            continue
         model = xgb.XGBClassifier(
             n_estimators=200, max_depth=4, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8,
@@ -97,9 +102,6 @@ def generate_trades(df: pd.DataFrame, threshold: float = THRESHOLD, train_size: 
                     trades.append({
                         "entry_date": entry_date,
                         "exit_date": df.index[exit_row],
-                        "proba": proba[i],
-                        "holding_days": holding,
-                        "gross_return": gross_return,
                         "net_return": net_return,
                     })
                 i += max(holding, 1)
@@ -110,12 +112,7 @@ def generate_trades(df: pd.DataFrame, threshold: float = THRESHOLD, train_size: 
 
 
 def get_fixed_bh_window(df: pd.DataFrame, train_size: int = 300, test_size: int = 60,
-                         step: int = 60, embargo: int = NUM_DAYS) -> tuple:
-    """
-    Buy&Hold 비교 기준을 "이번 거래들의 기간"이 아니라 walk-forward 전체 테스트
-    구간(첫 fold 시작~마지막 fold 끝)으로 고정 -- 시드/threshold마다 값이 흔들리는
-    문제를 방지 (종목별로 데이터 길이가 다르므로 종목마다 따로 계산해야 함).
-    """
+                         step: int = 60, embargo: int = NUM_DAYS):
     splits = walk_forward_splits(len(df), train_size, test_size, step, embargo)
     first_test_idx = splits[0][1][0]
     last_test_idx = splits[-1][1][-1]
@@ -135,7 +132,7 @@ def run_single_ticker(ticker: str, random_state: int = 42) -> dict:
 
 
 if __name__ == "__main__":
-    print("=== 종목별 개별 결과 (seed=42, 참고용 -- 이미 각각 검증한 값) ===")
+    print("=== 종목별 개별 결과 (seed=42, 참고용) ===")
     per_ticker = {}
     for ticker in TICKERS:
         r = run_single_ticker(ticker, random_state=42)
@@ -157,10 +154,6 @@ if __name__ == "__main__":
     print(f"블렌딩 Buy & Hold: {blended_bh:.1%}")
     print(f"블렌딩 기준: {'이김' if blended_net > blended_bh else '못 이김'}")
 
-    # ------------------------------------------------------------------
-    # 5-seed 블렌딩 재검증 -- 각 시드마다 두 종목을 각각 학습/거래 생성한 뒤 블렌딩.
-    # 총 거래 수가 150건 안팎으로 늘어난 상태에서도 재현되는지 확인.
-    # ------------------------------------------------------------------
     print("\n\n" + "=" * 60)
     print("=== 5-seed 블렌딩 재검증 ===")
     print("=" * 60)
@@ -183,6 +176,6 @@ if __name__ == "__main__":
     print(seed_df.round(4).to_string(index=False))
     win_count = (seed_df["blended_net"] > seed_df["blended_bh"]).sum()
     print(f"\n블렌딩 포트폴리오 기준 5개 시드 중 Buy & Hold를 이긴 시드: {win_count}/5")
-    print("판정: 전략(num_days=20 등)은 그대로 유지한 채 거래 수만 150건 안팎으로 늘린")
-    print("상태에서도 4~5/5면, 지난번 num_days=10 실패가 '전략을 바꿔서 생긴 실패'였다는")
-    print("설명에 힘이 실림. 여기서도 무너지면 정말 소표본 우연이었다는 쪽으로 기욺.")
+    print("비교 기준: pt_sl 재검증(MARKET_VAL 없이)은 3/5로 실패했음 -- 여기서 4~5/5가")
+    print("나오면 시장PER 추가가 실제로 도움이 된 것. 여전히 3/5 이하면 시장PER도")
+    print("이 블렌딩을 못 살린 것으로 봐야 함.")

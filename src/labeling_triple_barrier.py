@@ -64,13 +64,22 @@ def get_daily_volatility(close: pd.Series, span: int = 20) -> pd.Series:
 # ------------------------------------------------------------------
 def get_vertical_barrier(close: pd.Series, t_events: pd.DatetimeIndex, num_days: int) -> pd.Series:
     """
-    각 이벤트 시점 t로부터 num_days 거래일 후를 수직 배리어로 지정.
-    데이터 끝을 넘어가는 이벤트는 자동으로 제외됨 (아직 미결이라 라벨링 불가).
+    각 이벤트 시점 t로부터 num_days '거래일' 후를 수직 배리어로 지정.
+    [수정 2026-08] 기존엔 pd.Timedelta(days=num_days)로 달력일을 더한 뒤 그 날짜 이후
+    첫 거래일을 찾는 방식이라, 주말/공휴일 때문에 실제로는 num_days=20이어도
+    거래일 기준 13~14일 정도만 흘러갔음 (설계 의도인 20 거래일 보유와 실제 보유기간이
+    괴리 -- pt_sl 배리어 폭(target * sqrt(num_days))이 실제 보유기간보다 과도하게
+    넓게 잡혀 있었던 셈).
+    이제 인덱스 위치(거래일 카운트) 기준으로 정확히 num_days 거래일 뒤를 가리킴.
     """
-    barrier_idx = close.index.searchsorted(t_events + pd.Timedelta(days=num_days))
-    valid = barrier_idx < close.shape[0]
-    barrier_idx = barrier_idx[valid]
-    return pd.Series(close.index[barrier_idx], index=t_events[valid])
+    t_events = t_events.intersection(close.index)
+    event_pos = close.index.get_indexer(t_events)
+    barrier_pos = event_pos + num_days
+    valid = barrier_pos < len(close.index)
+    return pd.Series(
+        close.index[barrier_pos[valid]],
+        index=t_events[valid],
+    )
 
 
 # ------------------------------------------------------------------

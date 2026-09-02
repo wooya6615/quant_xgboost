@@ -54,29 +54,43 @@ def load_valuation(ticker: str, start: str, end: str) -> pd.DataFrame:
 # ------------------------------------------------------------------
 # 2. 밸류에이션 feature 생성
 # ------------------------------------------------------------------
-def add_valuation_features(df: pd.DataFrame, valuation_df: pd.DataFrame, zscore_window: int = 252) -> pd.DataFrame:
+def add_valuation_features(df: pd.DataFrame, valuation_df: pd.DataFrame, shift_days: int = 1) -> pd.DataFrame:
     """
-    df: build_feature_dataset()이 반환한 기존 feature 데이터셋
-    valuation_df: load_valuation()이 반환한 일별 PER/PBR/DIV 등
+    [수정] PER<=0(적자 또는 계산불가)을 명시적으로 NaN 처리.
 
-    절대 PER/PBR은 업종/종목마다 기준이 다르므로, 그 종목 자체의 최근 1년(252거래일)
-    분포 대비 z-score로 정규화 -- "지금이 이 종목 기준으로 싼 편인지 비싼 편인지"를 나타냄.
+    배경: PER은 연 1회(매년 5월, 사업보고서 검토 후) 갱신되고 다음 해 4월까지
+    고정값으로 유지됨. 적자연도(EPS<=0)면 PER이 0으로 기록되고 이 0이 1년
+    내내 유지됨. 기존엔 이 0을 그대로 둬서 (1) 모델이 "극단적 저평가"로
+    오독할 위험이 있었고 (2) rolling(252) 창이 적자연도로 가득 차면
+    std=0 -> z-score NaN/inf -> dropna()로 그 구간 전체가 소실되면서도
+    "정상 워밍업 감소"로 오인됐음 (010170 조사에서 발견, PROJECT_SUMMARY 참고).
+
+    [해결 방식] 0으로 채우거나(왜곡) dropna로 통째로 버리는(데이터 손실 심각,
+    특히 010170처럼 적자비율 80%+인 종목) 대신, NaN을 그대로 두고 XGBoost의
+    네이티브 결측치 처리에 맡김 -- "밸류에이션 정보 없음"을 있는 그대로 표현.
+    이 함수 안에서는 dropna를 호출하지 않음 -- 호출부(build_triple_barrier_
+    dataset_combined 등)에서 밸류에이션 컬럼을 dropna 대상에서 제외해야 함.
     """
-    merged = df.join(valuation_df[["PER", "PBR", "DIV"]], how="left")
+    v = valuation_df.shift(shift_days)
 
-    merged["per"] = merged["PER"]
-    merged["pbr"] = merged["PBR"]
-    merged["div"] = merged["DIV"]
+    per_clean = v["PER"].where(v["PER"] > 0, np.nan)
 
-    per_mean = merged["PER"].rolling(zscore_window).mean()
-    per_std = merged["PER"].rolling(zscore_window).std()
-    merged["per_zscore_252d"] = (merged["PER"] - per_mean) / per_std
+    result = df.copy()
+    result["per"] = per_clean
+    result["pbr"] = v["PBR"]
+    result["div"] = v["DIV"]
+    result["is_loss"] = (v["PER"] <= 0).astype(int)  # 적자(계산불가) 여부 -- 명시적 신호로 보존
 
-    pbr_mean = merged["PBR"].rolling(zscore_window).mean()
-    pbr_std = merged["PBR"].rolling(zscore_window).std()
-    merged["pbr_zscore_252d"] = (merged["PBR"] - pbr_mean) / pbr_std
-
-    return merged
+    result["per_zscore_252d"] = (
+        (result["per"] - result["per"].rolling(252, min_periods=60).mean())
+        / result["per"].rolling(252, min_periods=60).std()
+    )
+    result["pbr_zscore_252d"] = (
+        (result["pbr"] - result["pbr"].rolling(252, min_periods=60).mean())
+        / result["pbr"].rolling(252, min_periods=60).std()
+    )
+    # ⚠️ 여기서 dropna 안 함 -- NaN은 XGBoost가 학습 중 자체적으로 분기 방향을 결정
+    return result
 
 
 # ------------------------------------------------------------------

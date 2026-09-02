@@ -51,7 +51,7 @@ from feature_engineering import (
 from labeling_triple_barrier import get_daily_volatility
 
 PT_SL = (2, 1)   # build_production_model_064350_base.py와 동일하게 맞출 것
-NUM_DAYS = 20
+NUM_DAYS = 30    # [교체됨] 기존 20 -> num_days 축 검증으로 30 확정 (docs/PROJECT_SUMMARY.md 참고)
 VOL_SPAN = 20
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"

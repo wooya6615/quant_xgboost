@@ -33,7 +33,8 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from feature_engineering_triple_barrier import build_triple_barrier_dataset, FEATURE_COLS_BASE
 from kan_classifier import KANClassifier
 
-TICKER_KRX = "064350.KS"
+TICKER_KRX = "064350"
+TICKER = "064350.KS"
 TICKER_NAME = "현대로템"
 
 PT_SL = (2, 1)
@@ -189,7 +190,11 @@ if __name__ == "__main__":
     else:
         print("GPU를 못 찾아서 CPU로 돌아감 (KAN은 spline 계산 때문에 CPU에서 특히 느릴 수 있음)\n")
 
-    df = build_triple_barrier_dataset(TICKER_KRX, pt_sl=PT_SL, num_days=NUM_DAYS)
+    df = build_triple_barrier_dataset(TICKER, pt_sl=PT_SL, num_days=NUM_DAYS)
+    # build_triple_barrier_dataset()은 label_tb(원본 -1/0/1)까지만 반환함 --
+    # 이진 라벨은 기존 스크립트들(verify_base_only_triple_barrier.py 등)과 동일하게
+    # 호출부에서 직접 생성.
+    df["label_tb_binary"] = (df["label_tb"] > 0).astype(int)
     X = df[FEATURE_COLS_BASE].values
     y = df["label_tb_binary"].values
     print(f"=== {TICKER_NAME} ({TICKER_KRX}) BASE 13개 피처, triple-barrier ===")
